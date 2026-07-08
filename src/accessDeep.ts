@@ -106,11 +106,14 @@ export const setDeep = (
   }
 
   if (isSet(parent)) {
-    const oldValue = getNthKey(parent, +lastKey);
+    const index = +lastKey;
+    const oldValue = getNthKey(parent, index);
     const newValue = mapper(oldValue);
     if (oldValue !== newValue) {
-      parent.delete(oldValue);
-      parent.add(newValue);
+      const values = [...parent];
+      values[index] = newValue;
+      parent.clear();
+      values.forEach(value => parent.add(value));
     }
   }
 
@@ -122,10 +125,12 @@ export const setDeep = (
     switch (type) {
       case 'key': {
         const newKey = mapper(keyToRow);
-        parent.set(newKey, parent.get(keyToRow));
-
         if (newKey !== keyToRow) {
-          parent.delete(keyToRow);
+          const entries = [...parent];
+          parent.clear();
+          entries.forEach(([k, v]) =>
+            parent.set(k === keyToRow ? newKey : k, v)
+          );
         }
         break;
       }
