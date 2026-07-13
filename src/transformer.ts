@@ -14,13 +14,19 @@ import {
   TypedArrayConstructor,
   BigIntTypedArrayConstructor,
   isURL,
+  isArrayBuffer,
 } from './is.js';
 import { findArr } from './util.js';
 import SuperJSON from './index.js';
 
 export type PrimitiveTypeAnnotation = 'number' | 'undefined' | 'bigint';
 
-type LeafTypeAnnotation = PrimitiveTypeAnnotation | 'regexp' | 'Date' | 'URL';
+type LeafTypeAnnotation =
+  | PrimitiveTypeAnnotation
+  | 'regexp'
+  | 'Date'
+  | 'URL'
+  | 'ArrayBuffer';
 
 type TypedArrayAnnotation = ['typed-array', string];
 type ClassTypeAnnotation = ['class', string];
@@ -171,6 +177,14 @@ const simpleRules = [
     'URL',
     v => v.toString(),
     v => new URL(v)
+  ),
+
+  simpleTransformation<ArrayBuffer, number[], 'ArrayBuffer'>(
+    isArrayBuffer,
+    'ArrayBuffer',
+    // Raw bytes aren't valid JSON, so they're stored as an array of byte values.
+    v => Array.from(new Uint8Array(v)),
+    v => new Uint8Array(v).buffer
   ),
 ];
 
