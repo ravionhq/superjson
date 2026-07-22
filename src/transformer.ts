@@ -183,7 +183,7 @@ const simpleRules = [
     isArrayBuffer,
     'ArrayBuffer',
     // Raw bytes aren't valid JSON, so they're stored as an array of byte values.
-    v => Array.from(new Uint8Array(v)),
+    v => [...new Uint8Array(v)],
     v => new Uint8Array(v).buffer
   ),
 ];
