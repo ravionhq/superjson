@@ -700,6 +700,30 @@ describe('stringify & parse', () => {
       },
     },
 
+    'works with ArrayBuffer': {
+      input: {
+        a: new Uint8Array([1, 2, 3, 4]).buffer,
+        b: new ArrayBuffer(0),
+      },
+      output: {
+        a: [1, 2, 3, 4],
+        b: [],
+      },
+      outputAnnotations: {
+        values: {
+          a: ['ArrayBuffer'],
+          b: ['ArrayBuffer'],
+        },
+      },
+      dontExpectEquality: true,
+      customExpectations: (value: any) => {
+        expect(value.a).toBeInstanceOf(ArrayBuffer);
+        expect([...new Uint8Array(value.a)]).toEqual([1, 2, 3, 4]);
+        expect(value.b).toBeInstanceOf(ArrayBuffer);
+        expect(value.b.byteLength).toBe(0);
+      },
+    },
+
     'works for undefined, issue #48': {
       input: undefined,
       output: null,
