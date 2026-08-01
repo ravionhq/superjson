@@ -246,22 +246,46 @@ Returns **`your original value`**.
 
 Superjson supports many extra types which JSON does not. You can serialize all these:
 
-| type        | supported by standard JSON? | supported by Superjson? |
-| ----------- | --------------------------- | ----------------------- |
-| `string`    | ✅                          | ✅                      |
-| `number`    | ✅                          | ✅                      |
-| `boolean`   | ✅                          | ✅                      |
-| `null`      | ✅                          | ✅                      |
-| `Array`     | ✅                          | ✅                      |
-| `Object`    | ✅                          | ✅                      |
-| `undefined` | ❌                          | ✅                      |
-| `bigint`    | ❌                          | ✅                      |
-| `Date`      | ❌                          | ✅                      |
-| `RegExp`    | ❌                          | ✅                      |
-| `Set`       | ❌                          | ✅                      |
-| `Map`       | ❌                          | ✅                      |
-| `Error`     | ❌                          | ✅                      |
-| `URL`       | ❌                          | ✅                      |
+| type           | supported by standard JSON? | supported by Superjson? |
+| -------------- | --------------------------- | ----------------------- |
+| `string`       | ✅                          | ✅                      |
+| `number`       | ✅                          | ✅                      |
+| `boolean`      | ✅                          | ✅                      |
+| `null`         | ✅                          | ✅                      |
+| `Array`        | ✅                          | ✅                      |
+| `Object`       | ✅                          | ✅                      |
+| `undefined`    | ❌                          | ✅                      |
+| `bigint`       | ❌                          | ✅                      |
+| `Date`         | ❌                          | ✅                      |
+| `RegExp`       | ❌                          | ✅                      |
+| `Set`          | ❌                          | ✅                      |
+| `Map`          | ❌                          | ✅                      |
+| `Error`        | ❌                          | ✅                      |
+| `URL`          | ❌                          | ✅                      |
+| `typed arrays` | ❌                          | ✅                      |
+
+### Binary data
+
+Superjson supports binary data when it is represented as a typed array, such as
+`Uint8Array`, `Int16Array`, `Float32Array`, `BigInt64Array`, or
+`BigUint64Array`.
+
+Typed arrays are serialized to JSON-compatible arrays and annotated with their
+constructor name in `meta`, so deserialization restores the original typed array
+type:
+
+```js
+const bytes = new Uint8Array([1, 2, 3]);
+
+const { json, meta } = superjson.serialize({ bytes });
+
+// json === { bytes: [1, 2, 3] }
+// meta === { values: { bytes: [['typed-array', 'Uint8Array']] } }
+
+const restored = superjson.deserialize({ json, meta });
+
+// restored.bytes instanceof Uint8Array
+```
 
 ## Recipes
 
