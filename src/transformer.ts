@@ -75,9 +75,10 @@ const simpleRules = [
     (v): v is Date => v instanceof Date,
     'Date',
     // An invalid Date (`new Date(NaN)`) has no ISO representation and would
-    // otherwise be dropped to `null`, losing its type. Serialize it to an
-    // empty string, which `new Date('')` revives back into an invalid Date.
-    v => (isNaN(v.valueOf()) ? '' : v.toISOString()),
+    // otherwise be dropped to `null`, losing its type. Serialize it as
+    // "Invalid Date", which `new Date('Invalid Date')` revives back into an
+    // invalid Date - also on older versions that just call `new Date(v)`.
+    v => (isNaN(v.valueOf()) ? 'Invalid Date' : v.toISOString()),
     v => new Date(v)
   ),
 

@@ -202,7 +202,7 @@ describe('stringify & parse', () => {
         date: new Date('invalid'),
       },
       output: {
-        date: '',
+        date: 'Invalid Date',
       },
       outputAnnotations: {
         values: {
@@ -1449,4 +1449,24 @@ test('#310 fixes backwards compat', () => {
       b: new Set([1, 2]),
     },
   });
+});
+
+test('#355 invalid dates are backwards compatible', () => {
+  // payloads from previous versions (ISO strings) still parse unchanged
+  const date = new Date(2020, 1, 1);
+  expect(
+    SuperJSON.deserialize({
+      json: { date: date.toISOString() },
+      meta: { values: { date: ['Date'] } },
+    })
+  ).toEqual({ date });
+
+  // the "Invalid Date" sentinel goes through the same `new Date(string)`
+  // path older versions use, so they revive it to an invalid Date too
+  const result = SuperJSON.deserialize<{ date: Date }>({
+    json: { date: 'Invalid Date' },
+    meta: { values: { date: ['Date'] } },
+  });
+  expect(result.date).toBeInstanceOf(Date);
+  expect(Number.isNaN(result.date.getTime())).toBe(true);
 });
