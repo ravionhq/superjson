@@ -197,6 +197,25 @@ describe('stringify & parse', () => {
       },
     },
 
+    'works for invalid dates': {
+      input: {
+        date: new Date('invalid'),
+      },
+      output: {
+        date: '',
+      },
+      outputAnnotations: {
+        values: {
+          date: ['Date'],
+        },
+      },
+      dontExpectEquality: true,
+      customExpectations: value => {
+        expect(value.date).toBeInstanceOf(Date);
+        expect(Number.isNaN(value.date.getTime())).toBe(true);
+      },
+    },
+
     'works for Errors': {
       input: {
         e: new Error('epic fail'),
