@@ -1,6 +1,5 @@
 import {
   isBigint,
-  isDate,
   isInfinite,
   isMap,
   isNaNValue,
@@ -73,9 +72,13 @@ const simpleRules = [
     }
   ),
   simpleTransformation(
-    isDate,
+    (v): v is Date => v instanceof Date,
     'Date',
-    v => v.toISOString(),
+    // An invalid Date (`new Date(NaN)`) has no ISO representation and would
+    // otherwise be dropped to `null`, losing its type. Serialize it as
+    // "Invalid Date", which `new Date('Invalid Date')` revives back into an
+    // invalid Date - also on older versions that just call `new Date(v)`.
+    v => (isNaN(v.valueOf()) ? 'Invalid Date' : v.toISOString()),
     v => new Date(v)
   ),
 
