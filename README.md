@@ -280,7 +280,7 @@ const bytes = new Uint8Array([1, 2, 3]);
 const { json, meta } = superjson.serialize({ bytes });
 
 // json === { bytes: [1, 2, 3] }
-// meta === { values: { bytes: [['typed-array', 'Uint8Array']] } }
+// meta === { values: { bytes: [['typed-array', 'Uint8Array']] }, v: 1 }
 
 const restored = superjson.deserialize({ json, meta });
 
