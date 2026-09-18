@@ -1,16 +1,6 @@
 import { isMap, isArray, isPlainObject, isSet } from './is.js';
 import { includes } from './util.js';
-
-const getNthKey = (value: Map<any, any> | Set<any>, n: number): any => {
-  if (n > value.size) throw new Error('index out of bounds');
-  const keys = value.keys();
-  while (n > 0) {
-    keys.next();
-    n--;
-  }
-
-  return keys.next().value;
-};
+import { AsyncYieldController } from './async.js';
 
 function validatePath(path: (string | number)[]) {
   if (includes(path, '__proto__')) {
@@ -24,18 +14,38 @@ function validatePath(path: (string | number)[]) {
   }
 }
 
-export const getDeep = (object: object, path: (string | number)[]): object => {
+function* getNthKeyGenerator(
+  value: Map<any, any> | Set<any>,
+  n: number
+): Generator<void, any, void> {
+  if (n > value.size) throw new Error('index out of bounds');
+  const keys = value.keys();
+  while (n > 0) {
+    yield;
+    keys.next();
+    n--;
+  }
+
+  yield;
+  return keys.next().value;
+}
+
+function* getDeepGenerator(
+  object: object,
+  path: (string | number)[]
+): Generator<void, object, void> {
   validatePath(path);
 
   for (let i = 0; i < path.length; i++) {
+    yield;
     const key = path[i];
     if (isSet(object)) {
-      object = getNthKey(object, +key);
+      object = yield* getNthKeyGenerator(object, +key);
     } else if (isMap(object)) {
       const row = +key;
       const type = +path[++i] === 0 ? 'key' : 'value';
 
-      const keyOfRow = getNthKey(object, row);
+      const keyOfRow = yield* getNthKeyGenerator(object, row);
       switch (type) {
         case 'key':
           object = keyOfRow;
@@ -50,13 +60,13 @@ export const getDeep = (object: object, path: (string | number)[]): object => {
   }
 
   return object;
-};
+}
 
-export const setDeep = (
+function* setDeepGenerator(
   object: any,
   path: (string | number)[],
   mapper: (v: any) => any
-): any => {
+): Generator<void, any, void> {
   validatePath(path);
 
   if (path.length === 0) {
@@ -66,6 +76,7 @@ export const setDeep = (
   let parent = object;
 
   for (let i = 0; i < path.length - 1; i++) {
+    yield;
     const key = path[i];
 
     if (isArray(parent)) {
@@ -75,7 +86,7 @@ export const setDeep = (
       parent = parent[key];
     } else if (isSet(parent)) {
       const row = +key;
-      parent = getNthKey(parent, row);
+      parent = yield* getNthKeyGenerator(parent, row);
     } else if (isMap(parent)) {
       const isEnd = i === path.length - 2;
       if (isEnd) {
@@ -85,7 +96,7 @@ export const setDeep = (
       const row = +key;
       const type = +path[++i] === 0 ? 'key' : 'value';
 
-      const keyOfRow = getNthKey(parent, row);
+      const keyOfRow = yield* getNthKeyGenerator(parent, row);
       switch (type) {
         case 'key':
           parent = keyOfRow;
@@ -97,6 +108,7 @@ export const setDeep = (
     }
   }
 
+  yield;
   const lastKey = path[path.length - 1];
 
   if (isArray(parent)) {
@@ -106,7 +118,7 @@ export const setDeep = (
   }
 
   if (isSet(parent)) {
-    const oldValue = getNthKey(parent, +lastKey);
+    const oldValue = yield* getNthKeyGenerator(parent, +lastKey);
     const newValue = mapper(oldValue);
     if (oldValue !== newValue) {
       parent.delete(oldValue);
@@ -116,7 +128,7 @@ export const setDeep = (
 
   if (isMap(parent)) {
     const row = +path[path.length - 2];
-    const keyToRow = getNthKey(parent, row);
+    const keyToRow = yield* getNthKeyGenerator(parent, row);
 
     const type = +lastKey === 0 ? 'key' : 'value';
     switch (type) {
@@ -138,4 +150,55 @@ export const setDeep = (
   }
 
   return object;
+}
+
+export const getDeep = (object: object, path: (string | number)[]): object => {
+  const iterator = getDeepGenerator(object, path);
+  let result = iterator.next();
+  while (!result.done) {
+    result = iterator.next();
+  }
+  return result.value;
+};
+
+export const getDeepAsync = async (
+  object: object,
+  path: (string | number)[],
+  scheduler: AsyncYieldController
+): Promise<object> => {
+  const iterator = getDeepGenerator(object, path);
+  let result = iterator.next();
+  while (!result.done) {
+    await scheduler.tick();
+    result = iterator.next();
+  }
+  return result.value;
+};
+
+export const setDeep = (
+  object: any,
+  path: (string | number)[],
+  mapper: (v: any) => any,
+): any => {
+  const iterator = setDeepGenerator(object, path, mapper);
+  let result = iterator.next();
+  while (!result.done) {
+    result = iterator.next();
+  }
+  return result.value;
+};
+
+export const setDeepAsync = async (
+  object: any,
+  path: (string | number)[],
+  mapper: (v: any) => any,
+  scheduler: AsyncYieldController
+): Promise<any> => {
+  const iterator = setDeepGenerator(object, path, mapper);
+  let result = iterator.next();
+  while (!result.done) {
+    await scheduler.tick();
+    result = iterator.next();
+  }
+  return result.value;
 };

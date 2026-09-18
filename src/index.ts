@@ -7,11 +7,21 @@ import {
 } from './custom-transformer-registry.js';
 import {
   applyReferentialEqualityAnnotations,
+  applyReferentialEqualityAnnotationsAsync,
   applyValueAnnotations,
+  applyValueAnnotationsAsync,
+  asyncWalker,
   generateReferentialEqualityAnnotations,
+  generateReferentialEqualityAnnotationsAsync,
   walker,
 } from './plainer.js';
 import { copy } from 'copy-anything';
+import {
+  AsyncOptions,
+  AsyncDeserializeOptions,
+  AsyncYieldController,
+  copyAsync,
+} from './async.js';
 
 export default class SuperJSON {
   /**
@@ -80,6 +90,81 @@ export default class SuperJSON {
     return result;
   }
 
+  async serializeAsync(
+    object: SuperJSONValue,
+    options?: AsyncOptions
+  ): Promise<SuperJSONResult> {
+    const scheduler = new AsyncYieldController(options);
+    const identities = new Map<any, any[][]>();
+    const output = await asyncWalker(
+      object,
+      identities,
+      this,
+      this.dedupe,
+      scheduler
+    );
+    const res: SuperJSONResult = {
+      json: output.transformedValue,
+    };
+
+    if (output.annotations) {
+      res.meta = {
+        ...res.meta,
+        values: output.annotations,
+      };
+    }
+
+    const equalityAnnotations =
+      await generateReferentialEqualityAnnotationsAsync(
+        identities,
+        this.dedupe,
+        scheduler
+      );
+    if (equalityAnnotations) {
+      res.meta = {
+        ...res.meta,
+        referentialEqualities: equalityAnnotations,
+      };
+    }
+
+    if (res.meta) res.meta.v = 1;
+
+    return res;
+  }
+
+  async deserializeAsync<T = unknown>(
+    payload: SuperJSONResult,
+    options?: AsyncDeserializeOptions
+  ): Promise<T> {
+    const { json, meta } = payload;
+    const scheduler = new AsyncYieldController(options);
+
+    let result: T = options?.inPlace
+      ? json
+      : ((await copyAsync(json, scheduler)) as any);
+
+    if (meta?.values) {
+      result = await applyValueAnnotationsAsync(
+        result,
+        meta.values,
+        meta.v ?? 0,
+        this,
+        scheduler
+      );
+    }
+
+    if (meta?.referentialEqualities) {
+      result = await applyReferentialEqualityAnnotationsAsync(
+        result,
+        meta.referentialEqualities,
+        meta.v ?? 0,
+        scheduler
+      );
+    }
+
+    return result;
+  }
+
   stringify(object: SuperJSONValue): string {
     return JSON.stringify(this.serialize(object));
   }
@@ -121,6 +206,12 @@ export default class SuperJSON {
   static deserialize = SuperJSON.defaultInstance.deserialize.bind(
     SuperJSON.defaultInstance
   );
+  static serializeAsync = SuperJSON.defaultInstance.serializeAsync.bind(
+    SuperJSON.defaultInstance
+  );
+  static deserializeAsync = SuperJSON.defaultInstance.deserializeAsync.bind(
+    SuperJSON.defaultInstance
+  );
   static stringify = SuperJSON.defaultInstance.stringify.bind(
     SuperJSON.defaultInstance
   );
@@ -142,9 +233,13 @@ export default class SuperJSON {
 }
 
 export { SuperJSON, SuperJSONResult, SuperJSONValue };
+export type { AsyncDeserializeOptions, AsyncOptions } from './async.js';
 
 export const serialize = SuperJSON.serialize;
 export const deserialize = SuperJSON.deserialize;
+
+export const serializeAsync = SuperJSON.serializeAsync;
+export const deserializeAsync = SuperJSON.deserializeAsync;
 
 export const stringify = SuperJSON.stringify;
 export const parse = SuperJSON.parse;

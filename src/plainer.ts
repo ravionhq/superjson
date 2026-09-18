@@ -14,9 +14,11 @@ import {
   TypeAnnotation,
   untransformValue,
 } from './transformer.js';
-import { includes, forEach } from './util.js';
+import { includes } from './util.js';
 import { parsePath } from './pathstringifier.js';
 import { getDeep, setDeep } from './accessDeep.js';
+import { getDeepAsync, setDeepAsync } from './accessDeep.js';
+import { AsyncYieldController } from './async.js';
 import SuperJSON from './index.js';
 
 type Tree<T> = InnerNode<T> | Leaf<T>;
@@ -27,38 +29,61 @@ export type MinimisedTree<T> = Tree<T> | Record<string, Tree<T>> | undefined;
 
 const enableLegacyPaths = (version: number) => version < 1;
 
-function traverse<T>(
+function* traverseGenerator<T>(
   tree: MinimisedTree<T>,
-  walker: (v: T, path: string[]) => void,
   version: number,
   origin: string[] = []
-): void {
+): Generator<readonly [T, string[]], void, void> {
   if (!tree) {
     return;
   }
 
   const legacyPaths = enableLegacyPaths(version);
   if (!isArray(tree)) {
-    forEach(tree, (subtree, key) =>
-      traverse(subtree, walker, version, [
+    for (const [key, subtree] of Object.entries(tree)) {
+      yield* traverseGenerator(subtree, version, [
         ...origin,
         ...parsePath(key, legacyPaths),
-      ])
-    );
+      ]);
+    }
     return;
   }
 
   const [nodeValue, children] = tree;
   if (children) {
-    forEach(children, (child, key) => {
-      traverse(child, walker, version, [
+    for (const [key, child] of Object.entries(children)) {
+      yield* traverseGenerator(child, version, [
         ...origin,
         ...parsePath(key, legacyPaths),
       ]);
-    });
+    }
   }
 
-  walker(nodeValue, origin);
+  yield [nodeValue, origin];
+}
+
+function traverse<T>(
+  tree: MinimisedTree<T>,
+  walker: (v: T, path: string[]) => void,
+  version: number,
+  origin: string[] = []
+): void {
+  for (const [value, path] of traverseGenerator(tree, version, origin)) {
+    walker(value, path);
+  }
+}
+
+async function traverseAsync<T>(
+  tree: MinimisedTree<T>,
+  walker: (v: T, path: string[]) => Promise<void>,
+  version: number,
+  scheduler: AsyncYieldController,
+  origin: string[] = []
+): Promise<void> {
+  for (const [value, path] of traverseGenerator(tree, version, origin)) {
+    await scheduler.tick();
+    await walker(value, path);
+  }
 }
 
 export function applyValueAnnotations(
@@ -78,37 +103,109 @@ export function applyValueAnnotations(
   return plain;
 }
 
+export async function applyValueAnnotationsAsync(
+  plain: any,
+  annotations: MinimisedTree<TypeAnnotation>,
+  version: number,
+  superJson: SuperJSON,
+  scheduler: AsyncYieldController
+) {
+  await traverseAsync(
+    annotations,
+    async (type, path) => {
+      plain = await setDeepAsync(
+        plain,
+        path,
+        v => untransformValue(v, type, superJson),
+        scheduler
+      );
+    },
+    version,
+    scheduler
+  );
+
+  return plain;
+}
+
+interface ReferentialEqualityGroup {
+  sourcePath?: string;
+  targetPaths: string[];
+}
+
+function* referentialEqualityGroups(
+  annotations: ReferentialEqualityAnnotations
+): Generator<ReferentialEqualityGroup, void, void> {
+  if (isArray(annotations)) {
+    const [root, other] = annotations;
+    for (const targetPath of root) {
+      yield { targetPaths: [targetPath] };
+    }
+
+    if (other) {
+      for (const [sourcePath, targetPaths] of Object.entries(other)) {
+        yield { sourcePath, targetPaths };
+      }
+    }
+  } else {
+    for (const [sourcePath, targetPaths] of Object.entries(annotations)) {
+      yield { sourcePath, targetPaths };
+    }
+  }
+}
+
 export function applyReferentialEqualityAnnotations(
   plain: any,
   annotations: ReferentialEqualityAnnotations,
   version: number
 ) {
   const legacyPaths = enableLegacyPaths(version);
-  function apply(identicalPaths: string[], path: string) {
-    const object = getDeep(plain, parsePath(path, legacyPaths));
+  for (const { sourcePath, targetPaths } of referentialEqualityGroups(
+    annotations
+  )) {
+    const object = sourcePath
+      ? getDeep(plain, parsePath(sourcePath, legacyPaths))
+      : undefined;
 
-    identicalPaths
-      .map(path => parsePath(path, legacyPaths))
-      .forEach(identicalObjectPath => {
-        plain = setDeep(plain, identicalObjectPath, () => object);
-      });
-  }
-
-  if (isArray(annotations)) {
-    const [root, other] = annotations;
-    root.forEach(identicalPath => {
+    for (const targetPath of targetPaths) {
       plain = setDeep(
         plain,
-        parsePath(identicalPath, legacyPaths),
-        () => plain
+        parsePath(targetPath, legacyPaths),
+        () => (sourcePath ? object : plain)
       );
-    });
-
-    if (other) {
-      forEach(other, apply);
     }
-  } else {
-    forEach(annotations, apply);
+  }
+
+  return plain;
+}
+
+export async function applyReferentialEqualityAnnotationsAsync(
+  plain: any,
+  annotations: ReferentialEqualityAnnotations,
+  version: number,
+  scheduler: AsyncYieldController
+) {
+  const legacyPaths = enableLegacyPaths(version);
+  for (const { sourcePath, targetPaths } of referentialEqualityGroups(
+    annotations
+  )) {
+    await scheduler.tick();
+    const object = sourcePath
+      ? await getDeepAsync(
+          plain,
+          parsePath(sourcePath, legacyPaths),
+          scheduler
+        )
+      : undefined;
+
+    for (const targetPath of targetPaths) {
+      await scheduler.tick();
+      plain = await setDeepAsync(
+        plain,
+        parsePath(targetPath, legacyPaths),
+        () => (sourcePath ? object : plain),
+        scheduler
+      );
+    }
   }
 
   return plain;
@@ -142,37 +239,50 @@ export type ReferentialEqualityAnnotations =
   | [string[]]
   | [string[], Record<string, string[]>];
 
-export function generateReferentialEqualityAnnotations(
+function* generateReferentialEqualityAnnotationsGenerator(
   identitites: Map<any, any[][]>,
   dedupe: boolean
-): ReferentialEqualityAnnotations | undefined {
+): Generator<void, ReferentialEqualityAnnotations | undefined, void> {
   const result: Record<string, string[]> = {};
   let rootEqualityPaths: string[] | undefined = undefined;
 
-  identitites.forEach(paths => {
+  for (const pathsInMap of identitites.values()) {
+    yield;
+    let paths = pathsInMap;
     if (paths.length <= 1) {
-      return;
+      continue;
     }
 
     // if we're not deduping, all of these objects continue existing.
     // putting the shortest path first makes it easier to parse for humans
     // if we're deduping though, only the first entry will still exist, so we can't do this optimisation.
     if (!dedupe) {
-      paths = paths
-        .map(path => path.map(String))
-        .sort((a, b) => a.length - b.length);
+      const stringifiedPaths: string[][] = [];
+      for (const path of paths) {
+        yield;
+        stringifiedPaths.push(path.map(String));
+      }
+      paths = stringifiedPaths.sort((a, b) => a.length - b.length);
     }
 
     const [representativePath, ...identicalPaths] = paths;
 
     if (representativePath.length === 0) {
-      rootEqualityPaths = identicalPaths.map(stringifyPath);
+      rootEqualityPaths = [];
+      for (const path of identicalPaths) {
+        yield;
+        rootEqualityPaths.push(stringifyPath(path.map(String)));
+      }
     } else {
-      result[stringifyPath(representativePath)] = identicalPaths.map(
-        stringifyPath
-      );
+      const stringifiedIdenticalPaths: string[] = [];
+      for (const path of identicalPaths) {
+        yield;
+        stringifiedIdenticalPaths.push(stringifyPath(path.map(String)));
+      }
+      result[stringifyPath(representativePath.map(String))] =
+        stringifiedIdenticalPaths;
     }
-  });
+  }
 
   if (rootEqualityPaths) {
     if (isEmptyObject(result)) {
@@ -185,7 +295,39 @@ export function generateReferentialEqualityAnnotations(
   }
 }
 
-export const walker = (
+export function generateReferentialEqualityAnnotations(
+  identitites: Map<any, any[][]>,
+  dedupe: boolean
+): ReferentialEqualityAnnotations | undefined {
+  const iterator = generateReferentialEqualityAnnotationsGenerator(
+    identitites,
+    dedupe
+  );
+  let result = iterator.next();
+  while (!result.done) {
+    result = iterator.next();
+  }
+  return result.value;
+}
+
+export async function generateReferentialEqualityAnnotationsAsync(
+  identitites: Map<any, any[][]>,
+  dedupe: boolean,
+  scheduler: AsyncYieldController
+): Promise<ReferentialEqualityAnnotations | undefined> {
+  const iterator = generateReferentialEqualityAnnotationsGenerator(
+    identitites,
+    dedupe
+  );
+  let result = iterator.next();
+  while (!result.done) {
+    await scheduler.tick();
+    result = iterator.next();
+  }
+  return result.value;
+}
+
+function* walkerGenerator(
   object: any,
   identities: Map<any, any[][]>,
   superJson: SuperJSON,
@@ -193,7 +335,8 @@ export const walker = (
   path: any[] = [],
   objectsInThisPath: any[] = [],
   seenObjects = new Map<unknown, Result>()
-): Result => {
+): Generator<void, Result, void> {
+  yield;
   const primitive = isPrimitive(object);
 
   if (!primitive) {
@@ -240,7 +383,7 @@ export const walker = (
   const transformedValue: any = isArray(transformed) ? [] : {};
   const innerAnnotations: Record<string, Tree<TypeAnnotation>> = {};
 
-  forEach(transformed, (value, index) => {
+  for (const [index, value] of Object.entries(transformed)) {
     if (
       index === '__proto__' ||
       index === 'constructor' ||
@@ -251,7 +394,7 @@ export const walker = (
       );
     }
 
-    const recursiveResult = walker(
+    const recursiveResult = yield* walkerGenerator(
       value,
       identities,
       superJson,
@@ -266,11 +409,11 @@ export const walker = (
     if (isArray(recursiveResult.annotations)) {
       innerAnnotations[escapeKey(index)] = recursiveResult.annotations;
     } else if (isPlainObject(recursiveResult.annotations)) {
-      forEach(recursiveResult.annotations, (tree, key) => {
+      for (const [key, tree] of Object.entries(recursiveResult.annotations)) {
         innerAnnotations[escapeKey(index) + '.' + key] = tree;
-      });
+      }
     }
-  });
+  }
 
   const result: Result = isEmptyObject(innerAnnotations)
     ? {
@@ -290,4 +433,56 @@ export const walker = (
   }
 
   return result;
+}
+
+export const walker = (
+  object: any,
+  identities: Map<any, any[][]>,
+  superJson: SuperJSON,
+  dedupe: boolean,
+  path: any[] = [],
+  objectsInThisPath: any[] = [],
+  seenObjects = new Map<unknown, Result>()
+): Result => {
+  const iterator = walkerGenerator(
+    object,
+    identities,
+    superJson,
+    dedupe,
+    path,
+    objectsInThisPath,
+    seenObjects
+  );
+  let result = iterator.next();
+  while (!result.done) {
+    result = iterator.next();
+  }
+  return result.value;
+};
+
+export const asyncWalker = async (
+  object: any,
+  identities: Map<any, any[][]>,
+  superJson: SuperJSON,
+  dedupe: boolean,
+  scheduler: AsyncYieldController,
+  path: any[] = [],
+  objectsInThisPath: any[] = [],
+  seenObjects = new Map<unknown, Result>()
+): Promise<Result> => {
+  const iterator = walkerGenerator(
+    object,
+    identities,
+    superJson,
+    dedupe,
+    path,
+    objectsInThisPath,
+    seenObjects
+  );
+  let result = iterator.next();
+  while (!result.done) {
+    await scheduler.tick();
+    result = iterator.next();
+  }
+  return result.value;
 };

@@ -82,6 +82,19 @@ const object = superjson.parse<
 // object === { date: new Date(0) }
 ```
 
+For asynchronous processing at the transport boundary, use
+`serializeAsync` and `deserializeAsync`:
+
+```js
+const payload = await superjson.serializeAsync(value, { yieldRate: 1024 });
+const object = await superjson.deserializeAsync(payload, { yieldRate: 1024 });
+```
+
+The synchronous `serialize` and `deserialize` APIs remain unchanged. The
+asynchronous APIs are available in browser and Node.js runtimes and process
+values in order, yielding to the event loop after the configured number of
+visited values.
+
 ## Advanced Usage
 
 For cases where you want lower level access to the `json` and `meta` data in the output, you can use the `serialize` and `deserialize` functions.
@@ -209,6 +222,32 @@ Options
   - `inPlace: true` will be much more performant on large objects if it's safe to mutate it
 
 Returns **`your original value`**.
+
+### serializeAsync
+
+Asynchronously serializes a JavaScript value while periodically yielding to the
+event loop.
+
+```js
+const payload = await serializeAsync(object, { yieldRate: 1024 });
+```
+
+Options
+
+- `yieldRate: number`
+  - Default: `1024`
+  - Number of visited values between event-loop yields
+
+### deserializeAsync
+
+Asynchronously deserializes the output of `serializeAsync`.
+
+```js
+const object = await deserializeAsync(payload, { yieldRate: 1024 });
+```
+
+It accepts the same `yieldRate` option as `serializeAsync` and the `inPlace`
+option documented for `deserialize`.
 
 ### stringify
 
