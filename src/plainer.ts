@@ -96,6 +96,11 @@ export function applyReferentialEqualityAnnotations(
 
   if (isArray(annotations)) {
     const [root, other] = annotations;
+    if (other) {
+      forEach(other, apply);
+    }
+
+    // Restore root references after shared objects have their final identity.
     root.forEach(identicalPath => {
       plain = setDeep(
         plain,
@@ -103,10 +108,6 @@ export function applyReferentialEqualityAnnotations(
         () => plain
       );
     });
-
-    if (other) {
-      forEach(other, apply);
-    }
   } else {
     forEach(annotations, apply);
   }

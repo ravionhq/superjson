@@ -1431,3 +1431,57 @@ test('#310 fixes backwards compat', () => {
     },
   });
 });
+
+describe('root references in shared objects (#361)', () => {
+  for (const dedupe of [false, true]) {
+    for (const featuredFirst of [false, true]) {
+      test(`dedupe=${dedupe}, featuredFirst=${featuredFirst}`, () => {
+        const instance = new SuperJSON({ dedupe });
+        const user: any = { name: 'ann' };
+        const post = { author: user };
+        if (featuredFirst) {
+          user.featured = post;
+          user.posts = [post];
+        } else {
+          user.posts = [post];
+          user.featured = post;
+        }
+
+        const encoded = instance.serialize(user);
+        for (const back of [
+          instance.deserialize<any>(encoded),
+          instance.parse<any>(instance.stringify(user)),
+        ]) {
+          expect(back.featured).toBe(back.posts[0]);
+          expect(back.posts[0].author).toBe(back);
+          expect(back.name).toBe('ann');
+        }
+        expect(user.posts[0].author).toBe(user);
+      });
+    }
+  }
+});
+
+test('root references in shared array elements', () => {
+  const root: any[] = [];
+  const child = { root };
+  root.push([child], child);
+
+  const back = SuperJSON.parse<any[]>(SuperJSON.stringify(root));
+  expect(back[0][0]).toBe(back[1]);
+  expect(back[1].root).toBe(back);
+});
+
+test('root references with legacy referential equality metadata', () => {
+  const back = SuperJSON.deserialize<any>({
+    json: {
+      posts: [{ author: null }],
+      featured: { author: null },
+    },
+    meta: {
+      referentialEqualities: [['posts.0.author'], { featured: ['posts.0'] }],
+    },
+  });
+  expect(back.featured).toBe(back.posts[0]);
+  expect(back.posts[0].author).toBe(back);
+});
