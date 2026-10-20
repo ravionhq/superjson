@@ -191,7 +191,7 @@ function compositeTransformation<I, O, A extends CompositeTypeAnnotation>(
 const symbolRule = compositeTransformation(
   (s, superJson): s is Symbol => {
     if (isSymbol(s)) {
-      const isRegistered = !!superJson.symbolRegistry.getIdentifier(s);
+      const isRegistered = superJson.symbolRegistry.getIdentifier(s) !== undefined;
       return isRegistered;
     }
     return false;
