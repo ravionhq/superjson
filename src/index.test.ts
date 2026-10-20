@@ -22,6 +22,17 @@ import { describe, it, expect, test } from 'vitest';
 const isNode10 = process.version.indexOf('v10') === 0;
 
 describe('stringify & parse', () => {
+  it('round-trips registered symbols with an empty generated identifier', () => {
+    for (const symbol of [Symbol(), Symbol('')]) {
+      const instance = new SuperJSON();
+      instance.registerSymbol(symbol);
+      expect(instance.parse(instance.stringify({ symbol }))).toEqual({ symbol });
+      expect(instance.parse(instance.stringify(symbol))).toBe(symbol);
+      instance.registerSymbol(symbol, 'replacement');
+      expect(instance.symbolRegistry.getIdentifier(symbol)).toBe('');
+    }
+  });
+
   const cases: Record<
     string,
     {
