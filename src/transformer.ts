@@ -15,8 +15,8 @@ import {
   BigIntTypedArrayConstructor,
   isURL,
 } from './is.js';
-import { findArr } from './util.js';
 import SuperJSON from './index.js';
+import { parseISOString, toISOString } from './date.js';
 
 export type PrimitiveTypeAnnotation = 'number' | 'undefined' | 'bigint';
 
@@ -75,8 +75,8 @@ const simpleRules = [
   simpleTransformation(
     isDate,
     'Date',
-    v => v.toISOString(),
-    v => new Date(v)
+    toISOString,
+    parseISOString
   ),
 
   simpleTransformation(
@@ -190,7 +190,7 @@ function compositeTransformation<I, O, A extends CompositeTypeAnnotation>(
 
 const symbolRule = compositeTransformation(
   (s, superJson): s is Symbol => {
-    if (isSymbol(s)) {
+    if (superJson.symbolRegistry.size > 0 && isSymbol(s)) {
       const isRegistered = !!superJson.symbolRegistry.getIdentifier(s);
       return isRegistered;
     }
@@ -282,7 +282,7 @@ export function isInstanceOfRegisteredClass(
   potentialClass: any,
   superJson: SuperJSON
 ): potentialClass is any {
-  if (potentialClass?.constructor) {
+  if (superJson.classRegistry.size > 0 && potentialClass?.constructor) {
     const isRegistered = !!superJson.classRegistry.getIdentifier(
       potentialClass.constructor
     );
@@ -349,34 +349,114 @@ const customRule = compositeTransformation(
   }
 );
 
-const compositeRules = [classRule, symbolRule, customRule, typedArrayRule];
+const [
+  undefinedRule,
+  bigintRule,
+  dateRule,
+  errorRule,
+  regexpRule,
+  setRule,
+  mapRule,
+  nonFiniteRule,
+  negativeZeroRule,
+  urlRule,
+] = simpleRules;
+
+const objectRules = [dateRule, errorRule, regexpRule, setRule, mapRule, urlRule];
+
+const applySimple = (
+  rule: typeof simpleRules[number],
+  value: any,
+  superJson: SuperJSON
+) => ({
+  value: rule.transform(value as never, superJson),
+  type: rule.annotation,
+});
+
+// Same rule order as before: class, symbol, custom, typed array, then the simple rules. The simple
+// rules are split by typeof because each one only accepts a single typeof.
+/** Class, symbol and custom rules only. */
+export const transformRegisteredValue = (
+  value: any,
+  superJson: SuperJSON
+): { value: any; type: TypeAnnotation } | undefined => {
+  if (classRule.isApplicable(value, superJson)) {
+    return {
+      value: classRule.transform(value, superJson),
+      type: classRule.annotation(value, superJson),
+    };
+  }
+
+  if (symbolRule.isApplicable(value, superJson)) {
+    return {
+      value: symbolRule.transform(value, superJson),
+      type: symbolRule.annotation(value, superJson),
+    };
+  }
+
+  if (superJson.customTransformerRegistry.size > 0) {
+    const transformer = superJson.customTransformerRegistry.findApplicable(
+      value
+    );
+    if (transformer) {
+      return {
+        value: transformer.serialize(value),
+        type: ['custom', transformer.name],
+      };
+    }
+  }
+
+  return undefined;
+};
 
 export const transformValue = (
   value: any,
   superJson: SuperJSON
 ): { value: any; type: TypeAnnotation } | undefined => {
-  const applicableCompositeRule = findArr(compositeRules, rule =>
-    rule.isApplicable(value, superJson)
-  );
-  if (applicableCompositeRule) {
-    return {
-      value: applicableCompositeRule.transform(value as never, superJson),
-      type: applicableCompositeRule.annotation(value, superJson),
-    };
+  const registered = transformRegisteredValue(value, superJson);
+  if (registered) {
+    return registered;
   }
 
-  const applicableSimpleRule = findArr(simpleRules, rule =>
-    rule.isApplicable(value, superJson)
-  );
+  switch (typeof value) {
+    case 'undefined':
+      return applySimple(undefinedRule, value, superJson);
+    case 'bigint':
+      return applySimple(bigintRule, value, superJson);
+    case 'number':
+      if (nonFiniteRule.isApplicable(value, superJson)) {
+        return applySimple(nonFiniteRule, value, superJson);
+      }
 
-  if (applicableSimpleRule) {
-    return {
-      value: applicableSimpleRule.transform(value as never, superJson),
-      type: applicableSimpleRule.annotation,
-    };
+      if (negativeZeroRule.isApplicable(value, superJson)) {
+        return applySimple(negativeZeroRule, value, superJson);
+      }
+
+      return undefined;
+    case 'object':
+    case 'function': {
+      if (value === null) {
+        return undefined;
+      }
+
+      if (typedArrayRule.isApplicable(value, superJson)) {
+        return {
+          value: typedArrayRule.transform(value, superJson),
+          type: typedArrayRule.annotation(value, superJson),
+        };
+      }
+
+      for (let i = 0; i < objectRules.length; i++) {
+        if (objectRules[i].isApplicable(value, superJson)) {
+          return applySimple(objectRules[i], value, superJson);
+        }
+      }
+
+      return undefined;
+    }
+    default:
+      return undefined;
   }
-
-  return undefined;
 };
 
 const simpleRulesByAnnotation: Record<string, typeof simpleRules[0]> = {};

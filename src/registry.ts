@@ -21,6 +21,10 @@ export class Registry<T> {
     this.kv.clear();
   }
 
+  get size(): number {
+    return this.kv.valueToKey.size;
+  }
+
   getIdentifier(value: T) {
     return this.kv.getByValue(value);
   }

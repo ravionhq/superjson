@@ -13,6 +13,19 @@ const getNthKey = (value: Map<any, any> | Set<any>, n: number): any => {
 };
 
 function validatePath(path: (string | number)[]) {
+  let suspicious = false;
+  for (let i = 0; i < path.length; i++) {
+    const key = path[i];
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+      suspicious = true;
+      break;
+    }
+  }
+
+  if (!suspicious) {
+    return;
+  }
+
   if (includes(path, '__proto__')) {
     throw new Error('__proto__ is not allowed as a property');
   }

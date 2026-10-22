@@ -1,5 +1,4 @@
 import { JSONValue } from './types.js';
-import { find } from './util.js';
 
 export interface CustomTransfomer<I, O extends JSONValue> {
   name: string;
@@ -10,15 +9,26 @@ export interface CustomTransfomer<I, O extends JSONValue> {
 
 export class CustomTransformerRegistry {
   private transfomers: Record<string, CustomTransfomer<any, any>> = {};
+  private ordered: CustomTransfomer<any, any>[] = [];
 
   register<I, O extends JSONValue>(transformer: CustomTransfomer<I, O>) {
     this.transfomers[transformer.name] = transformer;
+    this.ordered = Object.values(this.transfomers);
+  }
+
+  get size(): number {
+    return this.ordered.length;
   }
 
   findApplicable<T>(v: T) {
-    return find(this.transfomers, transformer =>
-      transformer.isApplicable(v)
-    ) as CustomTransfomer<T, JSONValue> | undefined;
+    const transformers = this.ordered;
+    for (let i = 0; i < transformers.length; i++) {
+      if (transformers[i].isApplicable(v)) {
+        return transformers[i] as CustomTransfomer<T, JSONValue>;
+      }
+    }
+
+    return undefined;
   }
 
   findByName(name: string) {
