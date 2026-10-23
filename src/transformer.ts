@@ -260,12 +260,6 @@ const typedArrayRule = compositeTransformation(
       return new bigIntCtor(values);
     }
 
-    const ctor = constructorToName[a[1]];
-
-    if (!ctor) {
-      throw new Error('Trying to deserialize unknown typed array');
-    }
-
     // Convert string representations back to special float values
     const values = v.map((n: number | string): number => {
       if (n === 'NaN') return NaN;
@@ -273,6 +267,16 @@ const typedArrayRule = compositeTransformation(
       if (n === '-Infinity') return -Infinity;
       return n as number;
     });
+
+    if (a[1] === 'Buffer') {
+      return (typeof Buffer !== 'undefined' ? Buffer.from(values) : new Uint8Array(values)) as any;
+    }
+
+    const ctor = constructorToName[a[1]];
+
+    if (!ctor) {
+      throw new Error('Trying to deserialize unknown typed array');
+    }
 
     return new ctor(values as number[]);
   }

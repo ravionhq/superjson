@@ -700,6 +700,18 @@ describe('stringify & parse', () => {
       },
     },
 
+    'works with Node Buffer': {
+      input: Buffer.from([1, 2, 3]),
+      output: [1, 2, 3],
+      outputAnnotations: {
+        values: [['typed-array', 'Buffer']],
+      },
+      customExpectations: (value: any) => {
+        expect(Buffer.isBuffer(value)).toBe(true);
+        expect(value.equals(Buffer.from([1, 2, 3]))).toBe(true);
+      },
+    },
+
     'works for undefined, issue #48': {
       input: undefined,
       output: null,
