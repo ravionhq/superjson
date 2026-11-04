@@ -237,7 +237,9 @@ export const walker = (
   const transformationResult = transformValue(object, superJson);
   const transformed = transformationResult?.value ?? object;
 
-  const transformedValue: any = isArray(transformed) ? [] : {};
+  const transformedValue: any = isArray(transformed)
+    ? new Array(transformed.length)
+    : {};
   const innerAnnotations: Record<string, Tree<TypeAnnotation>> = {};
 
   forEach(transformed, (value, index) => {
