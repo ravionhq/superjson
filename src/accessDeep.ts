@@ -1,4 +1,4 @@
-import { isMap, isArray, isPlainObject, isSet } from './is.js';
+import { isMap, isArray, isSet } from './is.js';
 import { includes } from './util.js';
 
 const getNthKey = (value: Map<any, any> | Set<any>, n: number): any => {
@@ -71,7 +71,7 @@ export const setDeep = (
     if (isArray(parent)) {
       const index = +key;
       parent = parent[index];
-    } else if (isPlainObject(parent)) {
+    } else if (!isSet(parent) && !isMap(parent)) {
       parent = parent[key];
     } else if (isSet(parent)) {
       const row = +key;
@@ -101,7 +101,7 @@ export const setDeep = (
 
   if (isArray(parent)) {
     parent[+lastKey] = mapper(parent[+lastKey]);
-  } else if (isPlainObject(parent)) {
+  } else if (!isSet(parent) && !isMap(parent)) {
     parent[lastKey] = mapper(parent[lastKey]);
   }
 
