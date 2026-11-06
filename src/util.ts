@@ -1,4 +1,5 @@
 function valuesOfObj<T>(record: Record<string, T>): T[] {
+  const hasOwnProperty = Object.prototype.hasOwnProperty;
   if ('values' in Object) {
     // eslint-disable-next-line es5/no-es6-methods
     return Object.values(record);
@@ -8,7 +9,7 @@ function valuesOfObj<T>(record: Record<string, T>): T[] {
 
   // eslint-disable-next-line no-restricted-syntax
   for (const key in record) {
-    if (record.hasOwnProperty(key)) {
+    if (hasOwnProperty.call(record, key)) {
       values.push(record[key]);
     }
   }
