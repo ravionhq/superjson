@@ -9,7 +9,8 @@ export interface CustomTransfomer<I, O extends JSONValue> {
 }
 
 export class CustomTransformerRegistry {
-  private transfomers: Record<string, CustomTransfomer<any, any>> = {};
+  private transfomers: Record<string, CustomTransfomer<any, any>> =
+    Object.create(null);
 
   register<I, O extends JSONValue>(transformer: CustomTransfomer<I, O>) {
     this.transfomers[transformer.name] = transformer;
