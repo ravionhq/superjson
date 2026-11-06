@@ -25,6 +25,11 @@ export class ClassRegistry extends Registry<Class> {
     }
   }
 
+  clear(): void {
+    super.clear();
+    this.classToAllowedProps.clear();
+  }
+
   getAllowedProps(value: Class): string[] | undefined {
     return this.classToAllowedProps.get(value);
   }
