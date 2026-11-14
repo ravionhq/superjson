@@ -124,7 +124,11 @@ export const setDeep = (
         const newKey = mapper(keyToRow);
         parent.set(newKey, parent.get(keyToRow));
 
-        if (newKey !== keyToRow) {
+        // Map keys use SameValueZero: NaN equals itself, and -0 equals 0.
+        if (
+          newKey !== keyToRow &&
+          !(Number.isNaN(newKey) && Number.isNaN(keyToRow))
+        ) {
           parent.delete(keyToRow);
         }
         break;
