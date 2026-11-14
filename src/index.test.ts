@@ -1431,3 +1431,21 @@ test('#310 fixes backwards compat', () => {
     },
   });
 });
+
+it('preserves NaN Map keys shared with another value', () => {
+  const input = {
+    a: NaN,
+    m: new Map<number | string, number>([
+      [NaN, 7],
+      ['tail', 8],
+    ]),
+  };
+  const output = SuperJSON.parse<typeof input>(SuperJSON.stringify(input));
+  expect(output).toEqual(input);
+  expect([...output.m.keys()]).toEqual([NaN, 'tail']);
+});
+
+it('preserves a NaN Map key shared across nested arrays and maps', () => {
+  const input = [NaN, new Map([[NaN, new Map([[NaN, 1]])]])];
+  expect(SuperJSON.parse(SuperJSON.stringify(input))).toEqual(input);
+});
