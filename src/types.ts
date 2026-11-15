@@ -16,7 +16,7 @@ export interface JSONObject {
 type ClassInstance = any;
 
 export type SerializableJSONValue =
-  | Symbol
+  | symbol
   | Set<SuperJSONValue>
   | Map<SuperJSONValue, SuperJSONValue>
   | undefined
