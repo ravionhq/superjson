@@ -6,7 +6,7 @@ export class Registry<T> {
   constructor(private readonly generateIdentifier: (v: T) => string) {}
 
   register(value: T, identifier?: string): void {
-    if (this.kv.getByValue(value)) {
+    if (this.kv.getByValue(value) !== undefined) {
       return;
     }
 
