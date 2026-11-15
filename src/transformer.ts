@@ -250,6 +250,9 @@ const typedArrayRule = compositeTransformation(
         if (Number.isNaN(n)) return 'NaN';
         if (n === Infinity) return 'Infinity';
         if (n === -Infinity) return '-Infinity';
+        // Negative zero also doesn't survive JSON (JSON.stringify(-0) === '0'),
+        // so it's stored as a string like the other special float values.
+        if (n === 0 && 1 / n === -Infinity) return '-0';
       }
       return n;
     }),
@@ -271,6 +274,7 @@ const typedArrayRule = compositeTransformation(
       if (n === 'NaN') return NaN;
       if (n === 'Infinity') return Infinity;
       if (n === '-Infinity') return -Infinity;
+      if (n === '-0') return -0;
       return n as number;
     });
 

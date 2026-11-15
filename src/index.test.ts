@@ -676,6 +676,31 @@ describe('stringify & parse', () => {
       },
     },
 
+    'preserves negative zero in Float64Array and Float32Array': {
+      input: {
+        a: new Float64Array([-0, 0, -0, 1]),
+        b: new Float32Array([-0, 2]),
+      },
+      output: {
+        a: ['-0', 0, '-0', 1],
+        b: ['-0', 2],
+      },
+      outputAnnotations: {
+        values: {
+          a: [['typed-array', 'Float64Array']],
+          b: [['typed-array', 'Float32Array']],
+        },
+      },
+      customExpectations: (value: any) => {
+        expect(Object.is(value.a[0], -0)).toBe(true);
+        expect(Object.is(value.a[1], 0)).toBe(true);
+        expect(Object.is(value.a[2], -0)).toBe(true);
+        expect(value.a[3]).toBe(1);
+        expect(Object.is(value.b[0], -0)).toBe(true);
+        expect(value.b[1]).toBe(2);
+      },
+    },
+
     'works with BigInt typed arrays': {
       input: {
         a: new BigInt64Array([1n, 2n, -3n, 9007199254740993n]),
