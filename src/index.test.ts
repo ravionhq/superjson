@@ -1313,6 +1313,43 @@ test('regression #245: superjson referential equalities only use the top-most pa
   expect(parsed).toEqual(input);
 });
 
+test('restores multiple referentially equal values inside the same Set', () => {
+  const a = { tag: 'a' };
+  const b = { tag: 'b' };
+  const input = {
+    set: new Set([a, b]),
+    a,
+    b,
+  };
+
+  const output: any = SuperJSON.deserialize(SuperJSON.serialize(input));
+
+  expect([...output.set]).toEqual([a, b]);
+  expect(output.set.has(output.a)).toBe(true);
+  expect(output.set.has(output.b)).toBe(true);
+  expect([...output.set][0]).toBe(output.a);
+  expect([...output.set][1]).toBe(output.b);
+});
+
+test('restores multiple referentially equal keys inside the same Map', () => {
+  const a = { tag: 'a' };
+  const b = { tag: 'b' };
+  const input = {
+    map: new Map<any, any>([
+      [a, 1],
+      [b, 2],
+    ]),
+    a,
+    b,
+  };
+
+  const output: any = SuperJSON.deserialize(SuperJSON.serialize(input));
+
+  expect([...output.map.keys()]).toEqual([a, b]);
+  expect(output.map.get(output.a)).toBe(1);
+  expect(output.map.get(output.b)).toBe(2);
+});
+
 test('dedupe=true', () => {
   const instance = new SuperJSON({
     dedupe: true,
