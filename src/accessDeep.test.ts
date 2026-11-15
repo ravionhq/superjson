@@ -29,3 +29,17 @@ describe('setDeep', () => {
     });
   });
 });
+
+it.each([
+  [NaN, NaN],
+  [0, -0],
+  [-0, 0],
+])(
+  'preserves a Map entry when replacing %s with the same key %s',
+  (key, replacement) => {
+    const map = new Map([[key, 'value']]);
+    setDeep(map, [0, 0], () => replacement);
+    expect(map.size).toBe(1);
+    expect(map.get(key)).toBe('value');
+  }
+);
