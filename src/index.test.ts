@@ -1431,6 +1431,68 @@ test('deserialize in place', () => {
   expect(deserializedCopy).toEqual(deserializedInPlace);
 });
 
+test('rejects typed-array values that are not arrays', () => {
+  // Constructors treat a number, or an object with `length`, as a length and
+  // allocate that many elements. SuperJSON only emits a real array, so any
+  // other value must be rejected. Lengths stay tiny so a regression fails
+  // this assertion instead of allocating.
+  const constructors = [
+    'Int8Array',
+    'Uint8Array',
+    'Uint8ClampedArray',
+    'Int16Array',
+    'Uint16Array',
+    'Int32Array',
+    'Uint32Array',
+    'Float32Array',
+    'Float64Array',
+    'BigInt64Array',
+    'BigUint64Array',
+  ];
+
+  const arrayLikes = [
+    { length: 4 },
+    { length: '4' },
+    { length: 4.9 },
+    { length: '4e0' },
+    4,
+    '4',
+  ];
+
+  for (const constructor of constructors) {
+    for (const json of arrayLikes) {
+      expect(() =>
+        SuperJSON.deserialize({
+          json,
+          meta: {
+            values: [['typed-array', constructor]],
+          },
+        })
+      ).toThrow();
+
+      expect(() =>
+        SuperJSON.parse(
+          JSON.stringify({
+            json: { a: json },
+            meta: {
+              values: { a: [['typed-array', constructor]] },
+            },
+          })
+        )
+      ).toThrow();
+    }
+  }
+
+  const restored = SuperJSON.deserialize<Uint8Array>({
+    json: [1, 2, 3],
+    meta: {
+      values: [['typed-array', 'Uint8Array']],
+    },
+  });
+  expect(restored).toBeInstanceOf(Uint8Array);
+  expect([...restored]).toEqual([1, 2, 3]);
+});
+
 test('#310 fixes backwards compat', () => {
   expect(
     SuperJSON.deserialize({
