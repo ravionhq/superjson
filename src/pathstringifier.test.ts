@@ -22,12 +22,12 @@ describe('parsePath', () => {
     expect(parsePath(input, false)).toEqual(expectedOutput);
   });
 
-  it.each([
-    'test\\a.b',
-    'foo.bar.baz\\',
-  ])('parsePath(%p) is rejected', (input) => {
-    expect(() => parsePath(input, false)).toThrowError();
-  });
+  it.each(['test\\a.b', 'foo.bar.baz\\'])(
+    'parsePath(%p) is rejected',
+    input => {
+      expect(() => parsePath(input, false)).toThrowError();
+    }
+  );
 });
 
 describe('escapeKey', () => {

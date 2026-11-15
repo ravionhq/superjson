@@ -92,3 +92,14 @@ test('Regression: null-prototype object', () => {
   expect(isPlainObject(Object.create(null))).toBe(true);
   expect(isPrimitive(Object.create(null))).toBe(false);
 });
+
+test('isURL without URL global', () => {
+  const originalURL = globalThis.URL;
+  // @ts-ignore
+  delete globalThis.URL;
+
+  expect(() => isURL('https://example.com')).not.toThrow();
+  expect(isURL('https://example.com')).toBe(false);
+
+  globalThis.URL = originalURL;
+});

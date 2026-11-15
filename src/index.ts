@@ -60,10 +60,13 @@ export default class SuperJSON {
     return res;
   }
 
-  deserialize<T = unknown>(payload: SuperJSONResult, options?: { inPlace?: boolean }): T {
+  deserialize<T = unknown>(
+    payload: SuperJSONResult,
+    options?: { inPlace?: boolean }
+  ): T {
     const { json, meta } = payload;
 
-    let result: T = options?.inPlace ? json : copy(json) as any;
+    let result: T = options?.inPlace ? json : (copy(json) as any);
 
     if (meta?.values) {
       result = applyValueAnnotations(result, meta.values, meta.v ?? 0, this);

@@ -90,4 +90,5 @@ export type TypedArray = InstanceType<
 export const isTypedArray = (payload: any): payload is TypedArray =>
   ArrayBuffer.isView(payload) && !(payload instanceof DataView);
 
-export const isURL = (payload: any): payload is URL => payload instanceof URL;
+export const isURL = (payload: any): payload is URL =>
+  typeof URL !== 'undefined' && payload instanceof URL;

@@ -1423,7 +1423,9 @@ test('doesnt iterate to keys that dont exist', () => {
 test('deserialize in place', () => {
   const serialized = SuperJSON.serialize({ a: new Date() });
   const deserializedCopy = SuperJSON.deserialize(serialized);
-  const deserializedInPlace = SuperJSON.deserialize(serialized, { inPlace: true });
+  const deserializedInPlace = SuperJSON.deserialize(serialized, {
+    inPlace: true,
+  });
   expect(deserializedInPlace).toBe(serialized.json);
   expect(deserializedCopy).not.toBe(serialized.json);
   expect(deserializedCopy).toEqual(deserializedInPlace);
