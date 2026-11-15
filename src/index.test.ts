@@ -1557,3 +1557,85 @@ test('#310 fixes backwards compat', () => {
     },
   });
 });
+
+// A value with @@toStringTag "Symbol" is a primitive for identity tracking, but a
+// plain object, array, Map, Set, or Error is still walked. The back edge of a
+// cycle must be cut to null. Referential equality is not recorded for these values.
+test('cyclic values tagged as Symbol serialize', () => {
+  const object: any = { [Symbol.toStringTag]: 'Symbol', n: 1 };
+  object.self = object;
+  expect(SuperJSON.serialize(object)).toEqual({
+    json: { n: 1, self: null },
+  });
+
+  const array: any = [1];
+  array[Symbol.toStringTag] = 'Symbol';
+  array.push(array);
+  expect(SuperJSON.serialize(array)).toEqual({
+    json: [1, null],
+  });
+
+  const map = new Map<any, any>([['a', new Date(1)]]);
+  Object.defineProperty(map, Symbol.toStringTag, { value: 'Symbol' });
+  map.set('self', map);
+  expect(SuperJSON.serialize({ map })).toEqual({
+    json: {
+      map: [
+        ['a', '1970-01-01T00:00:00.001Z'],
+        ['self', null],
+      ],
+    },
+    meta: {
+      values: {
+        map: ['map', { '0.1': ['Date'] }],
+      },
+      v: 1,
+    },
+  });
+
+  const set = new Set<any>([1]);
+  Object.defineProperty(set, Symbol.toStringTag, { value: 'Symbol' });
+  set.add(set);
+  expect(SuperJSON.serialize({ set })).toEqual({
+    json: { set: [1, null] },
+    meta: {
+      values: { set: ['set'] },
+      v: 1,
+    },
+  });
+
+  const error = new Error('e');
+  error.cause = error;
+  Object.defineProperty(error, Symbol.toStringTag, {
+    value: 'Symbol',
+    configurable: true,
+  });
+  expect(new SuperJSON().serialize({ error })).toEqual({
+    json: { error: { name: 'Error', message: 'e', cause: null } },
+    meta: {
+      values: { error: ['Error'] },
+      v: 1,
+    },
+  });
+
+  const shared: any = { [Symbol.toStringTag]: 'Symbol', n: 1 };
+  expect(SuperJSON.serialize({ a: shared, b: shared })).toEqual({
+    json: { a: { n: 1 }, b: { n: 1 } },
+  });
+  expect(
+    new SuperJSON({ dedupe: true }).serialize({ a: shared, b: shared })
+  ).toEqual({
+    json: { a: { n: 1 }, b: { n: 1 } },
+  });
+
+  const left: any = { [Symbol.toStringTag]: 'Symbol', n: 1 };
+  const right: any = { [Symbol.toStringTag]: 'Symbol', n: 2 };
+  left.right = right;
+  right.left = left;
+  expect(SuperJSON.serialize({ left, right })).toEqual({
+    json: {
+      left: { n: 1, right: { n: 2, left: null } },
+      right: { n: 2, left: { n: 1, right: null } },
+    },
+  });
+});

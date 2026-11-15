@@ -274,6 +274,11 @@ interface WalkContext {
   dedupe: boolean;
   /** Every non-primitive in visiting order. `done` is false while its walk is still running. */
   seen: Map<unknown, Seen>;
+  /**
+   * Symbol-tagged containers currently on the stack. They are primitives for
+   * identity tracking, so a cycle's back edge is cut here instead of in `seen`.
+   */
+  visiting?: Set<any>;
   /** Annotations of the value the last `walk` call returned. */
   annotations: Annotations;
 }
@@ -292,6 +297,8 @@ function walk(
   const primitive = isPrimitive(object);
   let seen: Seen | undefined;
 
+  // Set only for a symbol-tagged container, which is a primitive and so has no `seen` entry.
+  let symbolTaggedContainer = false;
   if (!primitive) {
     seen = ctx.seen.get(object);
     if (seen) {
@@ -315,6 +322,20 @@ function walk(
     seen = new Seen(parent, key);
     ctx.seen.set(object, seen);
     parent = seen;
+  } else if (
+    // @@toStringTag "Symbol" is what makes an object a primitive. A plain
+    // object, array, Map, Set, Error, or registered class is still walked.
+    object !== null &&
+    (typeof object === 'object' || typeof object === 'function') &&
+    isDeep(object, ctx.superJson)
+  ) {
+    if (ctx.visiting?.has(object)) {
+      ctx.annotations = undefined;
+      return null;
+    }
+
+    (ctx.visiting ??= new Set()).add(object);
+    symbolTaggedContainer = true;
   }
 
   const plainContainer = !primitive && isPlainContainer(object);
@@ -371,6 +392,10 @@ function walk(
     ? [transformationResult.type]
     : undefined;
 
+  // A later sibling must walk this container again. It is not an identity.
+  if (symbolTaggedContainer) {
+    ctx.visiting?.delete(object);
+  }
   return finish(ctx, seen, transformedValue, annotations);
 }
 
