@@ -1,6 +1,3 @@
-const getType = (payload: any): string =>
-  Object.prototype.toString.call(payload).slice(8, -1);
-
 export const isUndefined = (payload: any): payload is undefined =>
   typeof payload === 'undefined';
 
@@ -11,9 +8,9 @@ export const isPlainObject = (
 ): payload is { [key: string]: any } => {
   if (typeof payload !== 'object' || payload === null) return false;
   if (payload === Object.prototype) return false;
-  if (Object.getPrototypeOf(payload) === null) return true;
+  const prototype = Object.getPrototypeOf(payload);
 
-  return Object.getPrototypeOf(payload) === Object.prototype;
+  return prototype === null || prototype === Object.prototype;
 };
 
 export const isEmptyObject = (payload: any): payload is {} =>
@@ -40,8 +37,14 @@ export const isMap = (payload: any): payload is Map<any, any> =>
 export const isSet = (payload: any): payload is Set<any> =>
   payload instanceof Set;
 
+// Object.prototype.toString reports an object as "Symbol" only through its @@toStringTag.
+const hasSymbolTag = (payload: any): boolean =>
+  ((typeof payload === 'object' && payload !== null) ||
+    typeof payload === 'function') &&
+  payload[Symbol.toStringTag] === 'Symbol';
+
 export const isSymbol = (payload: any): payload is symbol =>
-  getType(payload) === 'Symbol';
+  typeof payload === 'symbol' || hasSymbolTag(payload);
 
 export const isDate = (payload: any): payload is Date =>
   payload instanceof Date && !isNaN(payload.valueOf());
@@ -54,13 +57,23 @@ export const isNaNValue = (payload: any): payload is typeof NaN =>
 
 export const isPrimitive = (
   payload: any
-): payload is boolean | null | undefined | number | string | symbol =>
-  isBoolean(payload) ||
-  isNull(payload) ||
-  isUndefined(payload) ||
-  isNumber(payload) ||
-  isString(payload) ||
-  isSymbol(payload);
+): payload is boolean | null | undefined | number | string | symbol => {
+  switch (typeof payload) {
+    case 'boolean':
+    case 'string':
+    case 'undefined':
+    case 'symbol':
+      return true;
+    case 'number':
+      return !isNaN(payload);
+    case 'object':
+      return payload === null || hasSymbolTag(payload);
+    case 'function':
+      return hasSymbolTag(payload);
+    default:
+      return false;
+  }
+};
 
 export const isBigint = (payload: any): payload is bigint =>
   typeof payload === 'bigint';

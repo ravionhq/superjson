@@ -9,9 +9,9 @@ import {
   applyReferentialEqualityAnnotations,
   applyValueAnnotations,
   generateReferentialEqualityAnnotations,
-  walker,
+  walkRoot,
 } from './plainer.js';
-import { copy } from 'copy-anything';
+import { copy } from './util.js';
 
 export default class SuperJSON {
   /**
@@ -31,8 +31,7 @@ export default class SuperJSON {
   }
 
   serialize(object: SuperJSONValue): SuperJSONResult {
-    const identities = new Map<any, any[][]>();
-    const output = walker(object, identities, this, this.dedupe);
+    const output = walkRoot(object, this, this.dedupe);
     const res: SuperJSONResult = {
       json: output.transformedValue,
     };
@@ -45,7 +44,7 @@ export default class SuperJSON {
     }
 
     const equalityAnnotations = generateReferentialEqualityAnnotations(
-      identities,
+      output.identities,
       this.dedupe
     );
     if (equalityAnnotations) {
