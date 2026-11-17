@@ -276,7 +276,10 @@ interface WalkContext {
   seen: Map<unknown, Seen>;
   /** Annotations of the value the last `walk` call returned. */
   annotations: Annotations;
-  /** True when nothing is registered, so no rule can transform a plain JSON primitive. */
+  /**
+   * True when no class or custom transformer was registered at the start of the walk. `walk`
+   * checks the registries again, because a getter can register one during the walk.
+   */
   nothingRegistered: boolean;
 }
 
@@ -286,8 +289,8 @@ const isPlainContainer = (object: any): boolean =>
   (isArray(object) && Object.getPrototypeOf(object) === Array.prototype);
 
 /**
- * A string, boolean, null or finite number other than -0. When nothing is registered, `walk`
- * returns it as is with no annotations.
+ * A string, boolean, null or finite number other than -0. When no class or custom transformer
+ * is registered, `walk` returns it as is with no annotations.
  */
 const isUntransformedJSONPrimitive = (object: any): boolean => {
   switch (typeof object) {
@@ -314,7 +317,12 @@ function walk(
   parent: PathNode | null,
   key: string | null
 ): any {
-  if (ctx.nothingRegistered && isUntransformedJSONPrimitive(object)) {
+  if (
+    ctx.nothingRegistered &&
+    isUntransformedJSONPrimitive(object) &&
+    ctx.superJson.classRegistry.size === 0 &&
+    ctx.superJson.customTransformerRegistry.size === 0
+  ) {
     ctx.annotations = undefined;
     return object;
   }
@@ -440,7 +448,6 @@ export function walkRoot(
     annotations: undefined,
     nothingRegistered:
       superJson.classRegistry.size === 0 &&
-      superJson.symbolRegistry.size === 0 &&
       superJson.customTransformerRegistry.size === 0,
   };
   const transformedValue = walk(object, ctx, null, null);
