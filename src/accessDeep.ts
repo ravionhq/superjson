@@ -113,7 +113,12 @@ export const setDeep = (
   const lastKey = path[path.length - 1];
 
   if (isArray(parent)) {
-    parent[+lastKey] = mapper(parent[+lastKey]);
+    const index = +lastKey;
+    const leavesHoles =
+      Number.isInteger(index) && index > parent.length && index < 2 ** 32 - 1;
+    if (!leavesHoles) {
+      parent[index] = mapper(parent[index]);
+    }
   } else if (isPlainObject(parent)) {
     parent[lastKey] = mapper(parent[lastKey]);
   }
