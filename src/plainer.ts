@@ -68,10 +68,29 @@ export function applyValueAnnotations(
   version: number,
   superJson: SuperJSON
 ) {
+  let customSlots: Map<object, Set<unknown>> | undefined;
+
   traverse(
     annotations,
     (type, path) => {
-      plain = setDeep(plain, path, v => untransformValue(v, type, superJson));
+      const isCustom = isArray(type) && type[0] === 'custom';
+      plain = setDeep(plain, path, (v, container, slot) => {
+        if (isCustom && container) {
+          customSlots ??= new Map();
+          let slots = customSlots.get(container);
+          if (!slots) {
+            customSlots.set(container, (slots = new Set()));
+          }
+
+          if (slots.has(slot)) {
+            return v;
+          }
+
+          slots.add(slot);
+        }
+
+        return untransformValue(v, type, superJson);
+      });
     },
     version
   );
