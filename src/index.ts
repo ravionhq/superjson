@@ -12,6 +12,7 @@ import {
   walkRoot,
 } from './plainer.js';
 import { copy } from './util.js';
+import { IndexedCollections } from './accessDeep.js';
 
 export default class SuperJSON {
   /**
@@ -67,17 +68,28 @@ export default class SuperJSON {
 
     let result: T = options?.inPlace ? json : (copy(json) as any);
 
+    const collections = new IndexedCollections();
+
     if (meta?.values) {
-      result = applyValueAnnotations(result, meta.values, meta.v ?? 0, this);
+      result = applyValueAnnotations(
+        result,
+        meta.values,
+        meta.v ?? 0,
+        this,
+        collections
+      );
     }
 
     if (meta?.referentialEqualities) {
       result = applyReferentialEqualityAnnotations(
         result,
         meta.referentialEqualities,
-        meta.v ?? 0
+        meta.v ?? 0,
+        collections
       );
     }
+
+    collections.rebuild();
 
     return result;
   }
