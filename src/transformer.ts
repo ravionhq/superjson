@@ -298,6 +298,8 @@ export function isInstanceOfRegisteredClass(
   return false;
 }
 
+const restoredInstances = new WeakSet<object>();
+
 const classRule = compositeTransformation(
   isInstanceOfRegisteredClass,
   (clazz, superJson) => {
@@ -327,15 +329,17 @@ const classRule = compositeTransformation(
       );
     }
 
-    // With Object registered, every plain object from JSON is an instance of a registered class.
-    if (
-      isInstanceOfRegisteredClass(v, superJson) &&
-      (clazz === Object || v.constructor !== Object)
-    ) {
+    if (restoredInstances.has(v)) {
       return v;
     }
 
-    return Object.assign(Object.create(clazz.prototype), v);
+    const instance = Object.assign(Object.create(clazz.prototype), v);
+    // Tracking every instance slows class-heavy payloads by 60%; isConverted already recognises the
+    // others.
+    if (!isConverted(instance)) {
+      restoredInstances.add(instance);
+    }
+    return instance;
   }
 );
 

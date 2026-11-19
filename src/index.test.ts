@@ -1618,6 +1618,35 @@ describe('one value that many value annotations point at', () => {
     );
   });
 
+  test.each([
+    ['Object', Object],
+    ['Bare', Bare],
+  ])(
+    'is converted once by %s tags when it has its own constructor key',
+    (name, clazz) => {
+      const withObject = new SuperJSON();
+      withObject.registerClass(Object);
+      withObject.registerClass(Bare);
+      const json = Object.fromEntries(
+        Array.from({ length: 3000 }, (_, i) => ['k' + i, 0])
+      );
+      json.constructor = null as any;
+      const values = Object.fromEntries(
+        Array.from({ length: 5000 }, (_, i) => ['0e' + i, [['class', name]]])
+      );
+
+      const start = Date.now();
+      const output: any = withObject.deserialize({
+        json: [json],
+        meta: { values },
+      });
+
+      expect(Date.now() - start).toBeLessThan(1000);
+      expect(Object.getPrototypeOf(output[0])).toBe(clazz.prototype);
+      expect({ ...output[0] }).toEqual(json);
+    }
+  );
+
   test('keeps its first conversion when a different tag follows', () => {
     expect(
       SuperJSON.deserialize({
