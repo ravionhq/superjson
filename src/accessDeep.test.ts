@@ -51,6 +51,40 @@ describe('positions inside a Set or Map', () => {
     expect(() => getDeep(set, [4], collections)).toThrow('index out of bounds');
   });
 
+  it('follow keys() when a subclass has its own', () => {
+    class NewestFirst extends Set<string> {
+      *keys() {
+        yield* [...super.values()].reverse();
+      }
+    }
+
+    expect(
+      getDeep(new NewestFirst(['a', 'b']), [0], new IndexedCollections())
+    ).toBe('b');
+  });
+
+  it('keep a write when the mapper flushes the Set or Map being written', () => {
+    const collections = new IndexedCollections();
+    const set = new Set<unknown>(['a']);
+    set.add(set);
+    const map = new Map<unknown, unknown>([['k', 'v']]);
+    map.set(map, 'self');
+    const convert = (v: any) => {
+      collections.flush(v);
+      return 'converted';
+    };
+
+    setDeep(set, [1], convert, collections);
+    setDeep(map, [1, 0], convert, collections);
+    collections.rebuild();
+
+    expect([...set]).toEqual(['a', 'converted']);
+    expect([...map]).toEqual([
+      ['k', 'v'],
+      ['converted', 'self'],
+    ]);
+  });
+
   it('are walked by setDeep', () => {
     const collections = new IndexedCollections();
     const obj = {

@@ -3,6 +3,12 @@ import { includes } from './util.js';
 
 type Collection = Set<any> | Map<any, any>;
 
+// `values()` and `entries()` would bypass a subclass's own `keys` and `get`.
+const toElements = (collection: Collection): any[] =>
+  isSet(collection)
+    ? [...collection.keys()]
+    : Array.from(collection.keys(), key => [key, collection.get(key)]);
+
 // A custom transformer may write a Set or Map in any shape, so its JSON counts only when it lists
 // the members themselves.
 const listsMembers = (collection: Collection, json: any[]) =>
@@ -45,9 +51,7 @@ export class IndexedCollections {
     const known = (this.elements ??= new Map());
     let elements = known.get(collection);
     if (!elements) {
-      elements = isSet(collection)
-        ? [...collection.values()]
-        : [...collection.entries()];
+      elements = toElements(collection);
       known.set(collection, elements);
     }
 
@@ -56,7 +60,9 @@ export class IndexedCollections {
 
   // Replacing one element of a Set or Map in place costs a pass over all of them, so a write
   // stays in the element array until `rebuild`.
-  markWritten(collection: Collection) {
+  markWritten(collection: Collection, elements: any[]) {
+    // A flush inside the mapper drops this array, so it is registered again.
+    this.elements!.set(collection, elements);
     (this.written ??= new Set()).add(collection);
   }
 
@@ -205,7 +211,7 @@ export const setDeep = (
     const newValue = mapper(oldValue);
     if (oldValue !== newValue) {
       values[index] = newValue;
-      collections.markWritten(parent);
+      collections.markWritten(parent, values);
     }
   }
 
@@ -221,7 +227,7 @@ export const setDeep = (
         const newKey = mapper(keyToRow);
         if (newKey !== keyToRow && entry) {
           entry[0] = newKey;
-          collections.markWritten(parent);
+          collections.markWritten(parent, entries);
         }
         break;
       }

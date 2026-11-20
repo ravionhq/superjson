@@ -1707,6 +1707,40 @@ test('a value written into a Set is kept when the Set is annotated again', () =>
   });
 });
 
+test('a custom Map subclass with its own get() shares the value that get() returns', () => {
+  class RecordMap extends Map<string, any> {
+    set(key: string, value: unknown) {
+      return super.set(key, { stored: value });
+    }
+    get(key: string) {
+      return super.get(key)?.stored;
+    }
+  }
+  const instance = new SuperJSON();
+  instance.registerCustom<RecordMap, any[]>(
+    {
+      isApplicable: (v): v is RecordMap => v instanceof RecordMap,
+      serialize: v => [...v.keys()].map(key => [key, v.get(key)]),
+      deserialize: v => {
+        const map = new RecordMap();
+        v.forEach(([key, value]) => map.set(key, value));
+        return map;
+      },
+    },
+    'RecordMap'
+  );
+  const shared = { id: 1 };
+  const map = new RecordMap();
+  map.set('a', shared);
+
+  const output: any = instance.parse(
+    instance.stringify({ map, a: { b: { c: { copy: shared } } } })
+  );
+
+  expect(output.a.b.c.copy).toEqual(shared);
+  expect(output.a.b.c.copy).toBe(output.map.get('a'));
+});
+
 test('dedupe=true', () => {
   const instance = new SuperJSON({
     dedupe: true,
