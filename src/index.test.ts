@@ -806,6 +806,113 @@ describe('stringify & parse', () => {
         },
       },
     },
+    'regression #347: shared regex': {
+      input: () => {
+        const regex = /shared-regex/g;
+        return {
+          a: regex,
+          b: regex,
+        };
+      },
+      output: {
+        a: '/shared-regex/g',
+        b: '/shared-regex/g',
+      },
+      outputAnnotations: {
+        values: {
+          a: ['regexp'],
+          b: ['regexp'],
+        },
+        referentialEqualities: {
+          a: ['b'],
+        },
+      },
+      customExpectations: output => {
+        expect(output.a).toBe(output.b);
+      },
+    },
+    'regression #347: circular set and map': {
+      input: () => {
+        const set = new Set<any>();
+        set.add(set);
+
+        const map = new Map<any, any>();
+        map.set(map, map);
+        return {
+          a: set,
+          b: map,
+        };
+      },
+      output: {
+        a: [null],
+        b: [[null, null]],
+      },
+      outputAnnotations: {
+        values: {
+          a: ['set'],
+          b: ['map'],
+        },
+        referentialEqualities: {
+          a: ['a.0'],
+          b: ['b.0.0', 'b.0.1'],
+        },
+      },
+      customExpectations: output => {
+        expect(output.a.values().next().value).toBe(output.a);
+        expect(output.b.values().next().value).toBe(output.b);
+      },
+    },
+    'regression #347: circular set in root': {
+      input: () => {
+        const set = new Set<any>();
+        set.add(set);
+        return set;
+      },
+      output: [null],
+      outputAnnotations: {
+        values: ['set'],
+        referentialEqualities: [['0']],
+      },
+      customExpectations: output => {
+        expect(output.values().next().value).toBe(output);
+      },
+    },
+    'regression #347: circular map in root': {
+      input: () => {
+        const map = new Map<any, any>();
+        map.set(map, map);
+        return map;
+      },
+      output: [[null, null]],
+      outputAnnotations: {
+        values: ['map'],
+        referentialEqualities: [['0.0', '0.1']],
+      },
+      customExpectations: output => {
+        expect(output.values().next().value).toBe(output);
+        expect(output.keys().next().value).toBe(output);
+      },
+    },
+    'regression #347: only referential equalities': {
+      input: () => {
+        const a = {};
+        a['a'] = a;
+        return {
+          a: a,
+        };
+      },
+      output: {
+        a: { a: null },
+      },
+      outputAnnotations: {
+        referentialEqualities: {
+          a: ['a.a'],
+        },
+      },
+      customExpectations: output => {
+        expect(output.a).toBe(output.a.a);
+      },
+    },
   };
 
   function deepFreeze(object: any, alreadySeenObjects = new Set()) {
@@ -1373,6 +1480,265 @@ test('restores multiple referentially equal keys inside the same Map', () => {
   expect([...output.map.keys()]).toEqual([a, b]);
   expect(output.map.get(output.a)).toBe(1);
   expect(output.map.get(output.b)).toBe(2);
+});
+
+test('regression #346: referential equalities inside a large Set take linear time', () => {
+  const size = 166000;
+  const equalities = 55000;
+  const paths: string[] = [];
+  for (let i = 1; i <= equalities; i++) {
+    paths.push(String(size - i));
+  }
+
+  const start = Date.now();
+  const output = SuperJSON.deserialize<Set<unknown>>({
+    json: Array.from({ length: size }, () => []),
+    meta: {
+      values: ['set'],
+      referentialEqualities: { '0': paths },
+      v: 1,
+    },
+  });
+
+  expect(Date.now() - start).toBeLessThan(1000);
+  expect(output.size).toBe(size - equalities);
+});
+
+test('dedupe=true restores deduped values inside a Set at their own index', () => {
+  const instance = new SuperJSON({ dedupe: true });
+  const a = { tag: 'a' };
+  const b = { tag: 'b' };
+  const input = { b, a, set: new Set([a, 'x', b, 'y']) };
+
+  const output: any = instance.deserialize(instance.serialize(input));
+
+  expect([...output.set]).toEqual([a, 'x', b, 'y']);
+  expect([...output.set][0]).toBe(output.a);
+  expect([...output.set][2]).toBe(output.b);
+});
+
+test('dedupe=true restores multiple deduped keys inside the same Map', () => {
+  const instance = new SuperJSON({ dedupe: true });
+  const a = { tag: 'a' };
+  const b = { tag: 'b' };
+  const input = {
+    a,
+    b,
+    map: new Map<any, any>([
+      [a, 1],
+      [b, 2],
+    ]),
+  };
+
+  const output: any = instance.deserialize(instance.serialize(input));
+
+  expect([...output.map.keys()]).toEqual([a, b]);
+  expect(output.map.get(output.a)).toBe(1);
+  expect(output.map.get(output.b)).toBe(2);
+});
+
+test('dedupe=true restores deduped values inside a custom Set subclass', () => {
+  class Tags extends Set<unknown> {}
+  const instance = new SuperJSON({ dedupe: true });
+  instance.registerCustom<Tags, any[]>(
+    {
+      isApplicable: (v): v is Tags => v instanceof Tags,
+      serialize: v => [...v],
+      deserialize: v => new Tags(v),
+    },
+    'Tags'
+  );
+  const a = { tag: 'a' };
+  const b = { tag: 'b' };
+
+  const output: any = instance.deserialize(
+    instance.serialize({ a, b, tags: new Tags([a, b]) })
+  );
+
+  expect([...output.tags]).toEqual([a, b]);
+  expect(output.tags.has(output.a)).toBe(true);
+  expect(output.tags.has(output.b)).toBe(true);
+});
+
+test('a custom Map subclass written as a plain object still deserializes', () => {
+  class UserList extends Map<string, unknown> {}
+  const instance = new SuperJSON();
+  instance.registerCustom<UserList, any>(
+    {
+      isApplicable: (v): v is UserList => v instanceof UserList,
+      serialize: v => Object.fromEntries(v),
+      deserialize: v => new UserList(Object.entries(v)),
+    },
+    'UserList'
+  );
+  const ann = { name: 'Ann' };
+  const bob = { name: 'Bob' };
+  const team = { name: 'core' };
+
+  const output: any = instance.parse(
+    instance.stringify({
+      me: ann,
+      users: new UserList([
+        ['u1', ann],
+        ['u2', bob],
+      ]),
+    })
+  );
+  expect(output.users.get('u1')).toBe(output.me);
+  expect(output.users.get('u2')).toEqual(bob);
+
+  const shared: any = instance.parse(
+    instance.stringify({
+      users: new UserList([
+        ['u1', { team }],
+        ['u2', { team }],
+      ]),
+    })
+  );
+  expect([...shared.users]).toEqual([
+    ['u1', { team }],
+    ['u2', { team }],
+  ]);
+});
+
+test('a custom Map subclass written as a flat list still deserializes', () => {
+  class FlatMap extends Map<string, unknown> {}
+  const instance = new SuperJSON();
+  instance.registerCustom<FlatMap, any[]>(
+    {
+      isApplicable: (v): v is FlatMap => v instanceof FlatMap,
+      serialize: v => [...v].flat(),
+      deserialize: v => {
+        const map = new FlatMap();
+        for (let i = 0; i < v.length; i += 2) {
+          map.set(v[i], v[i + 1]);
+        }
+        return map;
+      },
+    },
+    'FlatMap'
+  );
+  const x = { name: 'x' };
+  const y = { name: 'y' };
+
+  const output: any = instance.parse(
+    instance.stringify({
+      x,
+      map: new FlatMap([
+        ['a', x],
+        ['b', y],
+      ]),
+    })
+  );
+
+  expect([...output.map]).toEqual([
+    ['a', x],
+    ['b', y],
+  ]);
+  expect(output.map.get('a')).toBe(output.x);
+});
+
+test('a custom Set subclass that adds a member keeps its own positions', () => {
+  class WithDefault extends Set<unknown> {}
+  const instance = new SuperJSON();
+  instance.registerCustom<WithDefault, any[]>(
+    {
+      isApplicable: (v): v is WithDefault => v instanceof WithDefault,
+      serialize: v => [...v],
+      deserialize: v => new WithDefault([...v, 'default']),
+    },
+    'WithDefault'
+  );
+
+  const output: any = instance.deserialize({
+    json: { set: ['a'], last: null },
+    meta: {
+      values: { set: [['custom', 'WithDefault']] },
+      referentialEqualities: { 'set.1': ['last'] },
+      v: 1,
+    },
+  } as any);
+
+  expect(output.last).toBe('default');
+});
+
+test('dedupe=true restores a custom Set subclass whose values were all seen before', () => {
+  class Tags extends Set<unknown> {}
+  const instance = new SuperJSON({ dedupe: true });
+  instance.registerCustom<Tags, any[]>(
+    {
+      isApplicable: (v): v is Tags => v instanceof Tags,
+      serialize: v => [...v],
+      deserialize: v => new Tags(v),
+    },
+    'Tags'
+  );
+  const a = { tag: 'a' };
+  const b = { tag: 'b' };
+  const c = { tag: 'c' };
+
+  const top: any = instance.parse(
+    instance.stringify({ a, b, c, tags: new Tags([c, b, a]) })
+  );
+  expect([...top.tags]).toEqual([c, b, a]);
+  expect([...top.tags][2]).toBe(top.a);
+
+  const nested: any = instance.parse(
+    instance.stringify({ a, b, c, set: new Set([a, b, new Tags([c, b, a])]) })
+  );
+  const [first, second, tags] = [...nested.set];
+  expect(first).toBe(nested.a);
+  expect(second).toBe(nested.b);
+  expect(tags).toBeInstanceOf(Tags);
+  expect([...tags]).toEqual([c, b, a]);
+});
+
+test('a value written into a Set is kept when the Set is annotated again', () => {
+  const output = SuperJSON.deserialize({
+    json: { o: { s: ['2020-01-01T00:00:00.000Z', 'x'] } },
+    meta: {
+      values: { 'o.s': ['set'], 'o.s.0': ['Date'], o: { s: ['set'] } },
+      v: 1,
+    },
+  } as any);
+
+  expect(output).toEqual({
+    o: { s: new Set([new Date('2020-01-01T00:00:00.000Z'), 'x']) },
+  });
+});
+
+test('a custom Map subclass with its own get() shares the value that get() returns', () => {
+  class RecordMap extends Map<string, any> {
+    set(key: string, value: unknown) {
+      return super.set(key, { stored: value });
+    }
+    get(key: string) {
+      return super.get(key)?.stored;
+    }
+  }
+  const instance = new SuperJSON();
+  instance.registerCustom<RecordMap, any[]>(
+    {
+      isApplicable: (v): v is RecordMap => v instanceof RecordMap,
+      serialize: v => [...v.keys()].map(key => [key, v.get(key)]),
+      deserialize: v => {
+        const map = new RecordMap();
+        v.forEach(([key, value]) => map.set(key, value));
+        return map;
+      },
+    },
+    'RecordMap'
+  );
+  const shared = { id: 1 };
+  const map = new RecordMap();
+  map.set('a', shared);
+
+  const output: any = instance.parse(
+    instance.stringify({ map, a: { b: { c: { copy: shared } } } })
+  );
+
+  expect(output.a.b.c.copy).toEqual(shared);
+  expect(output.a.b.c.copy).toBe(output.map.get('a'));
 });
 
 test('dedupe=true', () => {

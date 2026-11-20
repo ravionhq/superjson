@@ -17,7 +17,7 @@ import {
 } from './transformer.js';
 import { forEach } from './util.js';
 import { parsePath } from './pathstringifier.js';
-import { getDeep, setDeep } from './accessDeep.js';
+import { getDeep, IndexedCollections, setDeep } from './accessDeep.js';
 import SuperJSON from './index.js';
 
 type Tree<T> = InnerNode<T> | Leaf<T>;
@@ -66,12 +66,31 @@ export function applyValueAnnotations(
   plain: any,
   annotations: MinimisedTree<TypeAnnotation>,
   version: number,
-  superJson: SuperJSON
+  superJson: SuperJSON,
+  collections: IndexedCollections
 ) {
   traverse(
     annotations,
     (type, path) => {
-      plain = setDeep(plain, path, v => untransformValue(v, type, superJson));
+      plain = setDeep(
+        plain,
+        path,
+        v => {
+          collections.flush(v);
+          const value = untransformValue(v, type, superJson);
+          const custom = isArray(type) && type[0] === 'custom';
+          if (
+            type === 'set' ||
+            type === 'map' ||
+            (custom && (isSet(value) || isMap(value)))
+          ) {
+            collections.register(value, v, custom);
+          }
+
+          return value;
+        },
+        collections
+      );
     },
     version
   );
@@ -82,16 +101,17 @@ export function applyValueAnnotations(
 export function applyReferentialEqualityAnnotations(
   plain: any,
   annotations: ReferentialEqualityAnnotations,
-  version: number
+  version: number,
+  collections: IndexedCollections
 ) {
   const legacyPaths = enableLegacyPaths(version);
   function apply(identicalPaths: string[], path: string) {
-    const object = getDeep(plain, parsePath(path, legacyPaths));
+    const object = getDeep(plain, parsePath(path, legacyPaths), collections);
 
     identicalPaths
       .map(path => parsePath(path, legacyPaths))
       .forEach(identicalObjectPath => {
-        plain = setDeep(plain, identicalObjectPath, () => object);
+        plain = setDeep(plain, identicalObjectPath, () => object, collections);
       });
   }
 
@@ -101,7 +121,8 @@ export function applyReferentialEqualityAnnotations(
       plain = setDeep(
         plain,
         parsePath(identicalPath, legacyPaths),
-        () => plain
+        () => plain,
+        collections
       );
     });
 
