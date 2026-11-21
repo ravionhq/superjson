@@ -1581,6 +1581,43 @@ test('#310 fixes backwards compat', () => {
   });
 });
 
+test('annotations cannot stretch an array', () => {
+  const deserialize = (json: unknown, meta: object) =>
+    SuperJSON.deserialize<any>({ json, meta: { ...meta, v: 1 } } as any);
+
+  expect(() =>
+    deserialize([1], { values: { '20000000': ['undefined'] } })
+  ).toThrow('index out of bounds');
+  expect(() =>
+    deserialize([], {
+      values: [['typed-array', 'Uint8Array'], { '20000000': ['undefined'] }],
+    })
+  ).toThrow('index out of bounds');
+  expect(() =>
+    deserialize([{}], { referentialEqualities: { '0': ['20000000'] } })
+  ).toThrow('index out of bounds');
+  expect(deserialize([1], { values: { '1': ['undefined'] } })).toEqual([
+    1,
+    undefined,
+  ]);
+  expect(() =>
+    deserialize([1], { values: { '2': ['undefined'] } })
+  ).toThrow('index out of bounds');
+  expect(() =>
+    deserialize([1], { values: { '4294967294': ['undefined'] } })
+  ).toThrow('index out of bounds');
+  expect(
+    Object.keys(deserialize([1], { values: { '1\\.5': ['undefined'] } }))
+  ).toEqual(['0', '1.5']);
+
+  const list: any = [1];
+  list['4294967295'] = new Date(0);
+  const output = SuperJSON.deserialize<any>(SuperJSON.serialize(list), {
+    inPlace: true,
+  });
+  expect(output['4294967295']).toEqual(new Date(0));
+});
+
 test('deserialize is linear in path depth times child count', () => {
   const depth = 50_000;
   const childCount = 10_000;
