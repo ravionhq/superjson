@@ -1562,22 +1562,27 @@ test('annotations cannot stretch an array', () => {
   const deserialize = (json: unknown, meta: object) =>
     SuperJSON.deserialize<any>({ json, meta: { ...meta, v: 1 } } as any);
 
-  expect(
+  expect(() =>
     deserialize([1], { values: { '20000000': ['undefined'] } })
-  ).toHaveLength(1);
-  expect(
+  ).toThrow('index out of bounds');
+  expect(() =>
     deserialize([], {
       values: [['typed-array', 'Uint8Array'], { '20000000': ['undefined'] }],
     })
-  ).toHaveLength(0);
-  expect(
+  ).toThrow('index out of bounds');
+  expect(() =>
     deserialize([{}], { referentialEqualities: { '0': ['20000000'] } })
-  ).toHaveLength(1);
+  ).toThrow('index out of bounds');
   expect(deserialize([1], { values: { '1': ['undefined'] } })).toEqual([
     1,
     undefined,
   ]);
-  expect(deserialize([1], { values: { '2': ['undefined'] } })).toHaveLength(1);
+  expect(() =>
+    deserialize([1], { values: { '2': ['undefined'] } })
+  ).toThrow('index out of bounds');
+  expect(() =>
+    deserialize([1], { values: { '4294967294': ['undefined'] } })
+  ).toThrow('index out of bounds');
   expect(
     Object.keys(deserialize([1], { values: { '1\\.5': ['undefined'] } }))
   ).toEqual(['0', '1.5']);

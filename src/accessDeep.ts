@@ -131,9 +131,10 @@ export const setDeep = (
     const index = +lastKey;
     const leavesHoles =
       Number.isInteger(index) && index > parent.length && index < 2 ** 32 - 1;
-    if (!leavesHoles) {
-      parent[index] = mapper(parent[index]);
+    if (leavesHoles) {
+      throw new Error('index out of bounds');
     }
+    parent[index] = mapper(parent[index]);
   } else if (isPlainObject(parent)) {
     parent[lastKey] = mapper(parent[lastKey]);
   }
