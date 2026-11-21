@@ -17,7 +17,7 @@ import {
 } from './transformer.js';
 import { forEach } from './util.js';
 import { parsePath } from './pathstringifier.js';
-import { getDeep, setDeep } from './accessDeep.js';
+import { getDeep, setDeep, walkDeep } from './accessDeep.js';
 import SuperJSON from './index.js';
 
 type Tree<T> = InnerNode<T> | Leaf<T>;
@@ -28,55 +28,59 @@ export type MinimisedTree<T> = Tree<T> | Record<string, Tree<T>> | undefined;
 
 const enableLegacyPaths = (version: number) => version < 1;
 
-function traverse<T>(
-  tree: MinimisedTree<T>,
-  walker: (v: T, path: string[]) => void,
-  version: number,
-  origin: string[] = []
-): void {
-  if (!tree) {
-    return;
-  }
-
-  const legacyPaths = enableLegacyPaths(version);
-  if (!isArray(tree)) {
-    forEach(tree, (subtree, key) =>
-      traverse(subtree, walker, version, [
-        ...origin,
-        ...parsePath(key, legacyPaths),
-      ])
-    );
-    return;
-  }
-
-  const [nodeValue, children] = tree;
-  if (children) {
-    forEach(children, (child, key) => {
-      traverse(child, walker, version, [
-        ...origin,
-        ...parsePath(key, legacyPaths),
-      ]);
-    });
-  }
-
-  walker(nodeValue, origin);
-}
-
 export function applyValueAnnotations(
   plain: any,
   annotations: MinimisedTree<TypeAnnotation>,
   version: number,
   superJson: SuperJSON
 ) {
-  traverse(
-    annotations,
-    (type, path) => {
-      plain = setDeep(plain, path, v => untransformValue(v, type, superJson));
-    },
-    version
-  );
+  const legacyPaths = enableLegacyPaths(version);
 
-  return plain;
+  const apply = (
+    node: any,
+    path: (string | number)[],
+    tree: MinimisedTree<TypeAnnotation>,
+    error?: unknown
+  ): any => {
+    if (!tree) {
+      return node;
+    }
+
+    const children = isArray(tree) ? tree[1] : tree;
+    if (children) {
+      let parent: any;
+      let rest: (string | number)[] = [];
+      // An unwalkable path only fails once an annotation below it is applied.
+      if (!error) {
+        try {
+          [parent, rest] = walkDeep(node, path);
+        } catch (e) {
+          error = e;
+        }
+      }
+
+      for (const key of Object.keys(children)) {
+        apply(
+          parent,
+          [...rest, ...parsePath(key, legacyPaths)],
+          children[key],
+          error
+        );
+      }
+    }
+
+    if (!isArray(tree)) {
+      return node;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    return setDeep(node, path, v => untransformValue(v, tree[0], superJson));
+  };
+
+  return apply(plain, [], annotations);
 }
 
 export function applyReferentialEqualityAnnotations(
