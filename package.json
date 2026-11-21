@@ -53,7 +53,7 @@
     "benchmark": "^2.1.4",
     "decimal.js": "^10.3.1",
     "mongodb": "^3.6.6",
-    "tsdx": "^0.14.1",
+    "tsdx": "^2.0.0",
     "typescript": "^5.9.3",
     "vitest": "^0.34.6"
   },
