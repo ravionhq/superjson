@@ -1289,6 +1289,29 @@ test('prototype pollution - constructor', () => {
   expect((Object.prototype as any).x).toBeUndefined();
 });
 
+test('applies a custom transformer that is registered during serialize', () => {
+  const s = new SuperJSON();
+  const value = {
+    get a() {
+      s.registerCustom<string, string>(
+        {
+          isApplicable: (v): v is string =>
+            typeof v === 'string' && v.startsWith('x'),
+          serialize: v => v.slice(1),
+          deserialize: v => 'x' + v,
+        },
+        'x-string'
+      );
+      return 1;
+    },
+    b: 'xyz',
+  };
+
+  const res = s.serialize(value);
+  expect(res.json).toEqual({ a: 1, b: 'yz' });
+  expect(res.meta?.values).toEqual({ b: [['custom', 'x-string']] });
+});
+
 test('superjson instances are independent of one another', () => {
   class Car {}
   const s1 = new SuperJSON();

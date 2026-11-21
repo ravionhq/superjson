@@ -287,12 +287,44 @@ const isPlainContainer = (object: any): boolean =>
   isPlainObject(object) ||
   (isArray(object) && Object.getPrototypeOf(object) === Array.prototype);
 
+/**
+ * A string, boolean, null or finite number other than -0. When no class or custom transformer
+ * is registered, `walk` returns it as is with no annotations.
+ */
+const isUntransformedJSONPrimitive = (object: any): boolean => {
+  switch (typeof object) {
+    case 'string':
+    case 'boolean':
+      return true;
+    case 'number':
+      return (
+        object === object &&
+        object !== Infinity &&
+        object !== -Infinity &&
+        (object !== 0 || 1 / object > 0)
+      );
+    case 'object':
+      return object === null;
+    default:
+      return false;
+  }
+};
+
 function walk(
   object: any,
   ctx: WalkContext,
   parent: PathNode | null,
   key: string | null
 ): any {
+  if (
+    ctx.superJson.classRegistry.size === 0 &&
+    ctx.superJson.customTransformerRegistry.size === 0 &&
+    isUntransformedJSONPrimitive(object)
+  ) {
+    ctx.annotations = undefined;
+    return object;
+  }
+
   const primitive = isPrimitive(object);
   let seen: Seen | undefined;
 
