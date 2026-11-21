@@ -6,8 +6,9 @@ const positionOf = (n: number): number => (n > 0 ? Math.ceil(n) : 0);
 const getNthKey = (value: Map<any, any> | Set<any>, n: number): any => {
   if (n > value.size) throw new Error('index out of bounds');
   const keys = value.keys();
-  for (let i = positionOf(n); i > 0; i--) {
+  while (n > 0) {
     keys.next();
+    n--;
   }
 
   return keys.next().value;
