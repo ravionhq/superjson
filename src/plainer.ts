@@ -17,7 +17,12 @@ import {
 } from './transformer.js';
 import { forEach } from './util.js';
 import { parsePath } from './pathstringifier.js';
-import { getDeep, IndexedCollections, setDeep } from './accessDeep.js';
+import {
+  getDeep,
+  IndexedCollections,
+  setDeep,
+  walkDeep,
+} from './accessDeep.js';
 import SuperJSON from './index.js';
 
 type Tree<T> = InnerNode<T> | Leaf<T>;
@@ -28,40 +33,6 @@ export type MinimisedTree<T> = Tree<T> | Record<string, Tree<T>> | undefined;
 
 const enableLegacyPaths = (version: number) => version < 1;
 
-function traverse<T>(
-  tree: MinimisedTree<T>,
-  walker: (v: T, path: string[]) => void,
-  version: number,
-  origin: string[] = []
-): void {
-  if (!tree) {
-    return;
-  }
-
-  const legacyPaths = enableLegacyPaths(version);
-  if (!isArray(tree)) {
-    forEach(tree, (subtree, key) =>
-      traverse(subtree, walker, version, [
-        ...origin,
-        ...parsePath(key, legacyPaths),
-      ])
-    );
-    return;
-  }
-
-  const [nodeValue, children] = tree;
-  if (children) {
-    forEach(children, (child, key) => {
-      traverse(child, walker, version, [
-        ...origin,
-        ...parsePath(key, legacyPaths),
-      ]);
-    });
-  }
-
-  walker(nodeValue, origin);
-}
-
 export function applyValueAnnotations(
   plain: any,
   annotations: MinimisedTree<TypeAnnotation>,
@@ -69,33 +40,72 @@ export function applyValueAnnotations(
   superJson: SuperJSON,
   collections: IndexedCollections
 ) {
-  traverse(
-    annotations,
-    (type, path) => {
-      plain = setDeep(
-        plain,
-        path,
-        v => {
-          collections.flush(v);
-          const value = untransformValue(v, type, superJson);
-          const custom = isArray(type) && type[0] === 'custom';
-          if (
-            type === 'set' ||
-            type === 'map' ||
-            (custom && (isSet(value) || isMap(value)))
-          ) {
-            collections.register(value, v, custom);
-          }
+  const legacyPaths = enableLegacyPaths(version);
 
-          return value;
-        },
-        collections
-      );
-    },
-    version
-  );
+  const apply = (
+    node: any,
+    path: (string | number)[],
+    tree: MinimisedTree<TypeAnnotation>,
+    error?: unknown
+  ): any => {
+    if (!tree) {
+      return node;
+    }
 
-  return plain;
+    const children = isArray(tree) ? tree[1] : tree;
+    if (children) {
+      let parent: any;
+      let rest: (string | number)[] = [];
+      // An unwalkable path only fails once an annotation below it is applied.
+      if (!error) {
+        try {
+          [parent, rest] = walkDeep(node, path, collections);
+        } catch (e) {
+          error = e;
+        }
+      }
+
+      for (const key of Object.keys(children)) {
+        apply(
+          parent,
+          [...rest, ...parsePath(key, legacyPaths)],
+          children[key],
+          error
+        );
+      }
+    }
+
+    if (!isArray(tree)) {
+      return node;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    const type = tree[0];
+    return setDeep(
+      node,
+      path,
+      v => {
+        collections.flush(v);
+        const value = untransformValue(v, type, superJson);
+        const custom = isArray(type) && type[0] === 'custom';
+        if (
+          type === 'set' ||
+          type === 'map' ||
+          (custom && (isSet(value) || isMap(value)))
+        ) {
+          collections.register(value, v, custom);
+        }
+
+        return value;
+      },
+      collections
+    );
+  };
+
+  return apply(plain, [], annotations);
 }
 
 export function applyReferentialEqualityAnnotations(
@@ -304,12 +314,44 @@ const isPlainContainer = (object: any): boolean =>
   isPlainObject(object) ||
   (isArray(object) && Object.getPrototypeOf(object) === Array.prototype);
 
+/**
+ * A string, boolean, null or finite number other than -0. When no class or custom transformer
+ * is registered, `walk` returns it as is with no annotations.
+ */
+const isUntransformedJSONPrimitive = (object: any): boolean => {
+  switch (typeof object) {
+    case 'string':
+    case 'boolean':
+      return true;
+    case 'number':
+      return (
+        object === object &&
+        object !== Infinity &&
+        object !== -Infinity &&
+        (object !== 0 || 1 / object > 0)
+      );
+    case 'object':
+      return object === null;
+    default:
+      return false;
+  }
+};
+
 function walk(
   object: any,
   ctx: WalkContext,
   parent: PathNode | null,
   key: string | null
 ): any {
+  if (
+    ctx.superJson.classRegistry.size === 0 &&
+    ctx.superJson.customTransformerRegistry.size === 0 &&
+    isUntransformedJSONPrimitive(object)
+  ) {
+    ctx.annotations = undefined;
+    return object;
+  }
+
   const primitive = isPrimitive(object);
   let seen: Seen | undefined;
 
