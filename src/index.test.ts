@@ -1815,6 +1815,7 @@ test('a custom Map subclass with its own get() keeps its stored values when a ke
     [key, 1],
     ['b', 2],
   ]);
+  expect([...output.map.keys()][0]).toBe(output.key);
 });
 
 test('a custom Set subclass with its own keys() order keeps every member when one is shared', () => {
@@ -1842,6 +1843,59 @@ test('a custom Set subclass with its own keys() order keeps every member when on
 
   expect([...output.set]).toEqual([a, b, c]);
   expect([...output.set][0]).toBe(output.a);
+});
+
+test('a custom Set subclass with a sorted keys() order is read again after a member is restored', () => {
+  class ByRank extends Set<any> {
+    *keys() {
+      yield* [...super.values()].sort(
+        (a, b) => (a?.rank ?? 0) - (b?.rank ?? 0)
+      );
+    }
+  }
+  const instance = new SuperJSON({ dedupe: true });
+  instance.registerCustom<ByRank, any[]>(
+    {
+      isApplicable: (v): v is ByRank => v instanceof ByRank,
+      serialize: v => [...v],
+      deserialize: v => new ByRank(v),
+    },
+    'ByRank'
+  );
+  const detail = { text: 'd' };
+  const first = { rank: 1, detail };
+  const second = { rank: 2 };
+  const third = { rank: 3 };
+
+  const output: any = instance.parse(
+    instance.stringify({ second, set: new ByRank([first, second, third]), detail })
+  );
+
+  expect([...output.set]).toEqual([first, second, third]);
+  expect([...output.set][1]).toBe(output.second);
+  expect(output.detail).toBe([...output.set][0].detail);
+});
+
+test('a NaN Map key stays when another NaN was seen first', () => {
+  class Rec extends Map<string, unknown> {}
+  const instance = new SuperJSON();
+  instance.registerCustom<Rec, any>(
+    {
+      isApplicable: (v): v is Rec => v instanceof Rec,
+      serialize: v => Object.fromEntries(v),
+      deserialize: v => new Rec(Object.entries(v)),
+    },
+    'Rec'
+  );
+
+  const output: any = instance.parse(
+    instance.stringify({
+      rec: new Rec([['k0', [NaN]]]),
+      map: new Map([[NaN, 1]]),
+    })
+  );
+
+  expect([...output.map]).toEqual([[NaN, 1]]);
 });
 
 test('dedupe=true', () => {

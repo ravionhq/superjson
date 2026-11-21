@@ -17,7 +17,7 @@ const toIndex = (collection: Collection): Index => {
   const set = isSet(collection);
   if (
     keys.length === order.length &&
-    keys.every((key, i) => Object.is(key, set ? order[i] : order[i][0]))
+    keys.every((key, i) => Object.is(key, set ? order[i] : order[i]?.[0]))
   ) {
     return { rows: order, order, valuesInRows: false };
   }
@@ -26,7 +26,7 @@ const toIndex = (collection: Collection): Index => {
     return { rows: keys, order, valuesInRows: false };
   }
 
-  const entries = new Map(order.map(entry => [entry[0], entry]));
+  const entries = new Map(order.map(entry => [entry?.[0], entry]));
   return {
     rows: keys.map(key => entries.get(key) ?? [key]),
     order,
@@ -297,7 +297,11 @@ export const setDeep = (
       case 'key': {
         const newKey = mapper(keyToRow);
         if (newKey !== keyToRow && entry) {
-          entry[0] = newKey;
+          // `serialize` lists every NaN as one shared value, so a NaN key keeps its place.
+          if (keyToRow === keyToRow) {
+            entry[0] = newKey;
+          }
+
           collections.markWritten(parent, index);
         }
         break;
