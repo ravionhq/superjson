@@ -276,11 +276,6 @@ interface WalkContext {
   seen: Map<unknown, Seen>;
   /** Annotations of the value the last `walk` call returned. */
   annotations: Annotations;
-  /**
-   * True when no class or custom transformer was registered at the start of the walk. `walk`
-   * checks the registries again, because a getter can register one during the walk.
-   */
-  nothingRegistered: boolean;
 }
 
 // No built-in rule (Date, Map, typed array...) can match an object with one of these prototypes.
@@ -318,10 +313,9 @@ function walk(
   key: string | null
 ): any {
   if (
-    ctx.nothingRegistered &&
-    isUntransformedJSONPrimitive(object) &&
     ctx.superJson.classRegistry.size === 0 &&
-    ctx.superJson.customTransformerRegistry.size === 0
+    ctx.superJson.customTransformerRegistry.size === 0 &&
+    isUntransformedJSONPrimitive(object)
   ) {
     ctx.annotations = undefined;
     return object;
@@ -446,9 +440,6 @@ export function walkRoot(
     dedupe,
     seen: new Map(),
     annotations: undefined,
-    nothingRegistered:
-      superJson.classRegistry.size === 0 &&
-      superJson.customTransformerRegistry.size === 0,
   };
   const transformedValue = walk(object, ctx, null, null);
 
