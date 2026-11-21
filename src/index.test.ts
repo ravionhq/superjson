@@ -1740,6 +1740,54 @@ describe('one value that many value annotations point at', () => {
     ).toEqual({ a: ['x!'], b: ['x!'] });
     expect(counting.calls).toBe(1);
   });
+
+  test('is passed to a custom deserialize once when the arrays around it are replaced', () => {
+    const copying = { superJson: new SuperJSON(), leafCalls: 0 };
+    copying.superJson.registerCustom<any, any>(
+      {
+        isApplicable: () => false,
+        serialize: v => v,
+        deserialize: v => {
+          const copy = [...v];
+          if (copy.length === 2) {
+            copying.leafCalls++;
+          }
+          return copy;
+        },
+      },
+      'copy'
+    );
+
+    const depth = 10;
+    let json: any = [1, 2];
+    for (let i = 0; i < depth; i++) {
+      json = [json];
+    }
+
+    const values: Record<string, any> = {};
+    const tag = (level: number, annotation: any) => {
+      const spellingOfIndex0 = '0e' + Object.keys(values).length;
+      const path = [...Array(level - 1).fill('0'), spellingOfIndex0];
+      values[path.join('.')] = [annotation];
+    };
+    const replaceEachLevelBelow = (level: number) => {
+      if (level === depth) {
+        return;
+      }
+
+      tag(level + 1, ['custom', 'copy']);
+      replaceEachLevelBelow(level + 1);
+      if (level + 1 < depth) {
+        tag(level + 1, 'set');
+        replaceEachLevelBelow(level + 1);
+      }
+    };
+    replaceEachLevelBelow(0);
+
+    copying.superJson.deserialize({ json, meta: { values } });
+
+    expect(copying.leafCalls).toBe(1);
+  });
 });
 
 test('converts a plain object that was parsed in another realm', () => {
