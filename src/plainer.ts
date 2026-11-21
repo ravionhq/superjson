@@ -17,7 +17,12 @@ import {
 } from './transformer.js';
 import { forEach } from './util.js';
 import { parsePath } from './pathstringifier.js';
-import { getDeep, setDeep, walkDeep } from './accessDeep.js';
+import {
+  getDeep,
+  IndexedCollections,
+  setDeep,
+  walkDeep,
+} from './accessDeep.js';
 import SuperJSON from './index.js';
 
 type Tree<T> = InnerNode<T> | Leaf<T>;
@@ -32,7 +37,8 @@ export function applyValueAnnotations(
   plain: any,
   annotations: MinimisedTree<TypeAnnotation>,
   version: number,
-  superJson: SuperJSON
+  superJson: SuperJSON,
+  collections: IndexedCollections
 ) {
   const legacyPaths = enableLegacyPaths(version);
 
@@ -53,7 +59,7 @@ export function applyValueAnnotations(
       // An unwalkable path only fails once an annotation below it is applied.
       if (!error) {
         try {
-          [parent, rest] = walkDeep(node, path);
+          [parent, rest] = walkDeep(node, path, collections);
         } catch (e) {
           error = e;
         }
@@ -77,7 +83,26 @@ export function applyValueAnnotations(
       throw error;
     }
 
-    return setDeep(node, path, v => untransformValue(v, tree[0], superJson));
+    const type = tree[0];
+    return setDeep(
+      node,
+      path,
+      v => {
+        collections.flush(v);
+        const value = untransformValue(v, type, superJson);
+        const custom = isArray(type) && type[0] === 'custom';
+        if (
+          type === 'set' ||
+          type === 'map' ||
+          (custom && (isSet(value) || isMap(value)))
+        ) {
+          collections.register(value, v, custom);
+        }
+
+        return value;
+      },
+      collections
+    );
   };
 
   return apply(plain, [], annotations);
@@ -86,16 +111,17 @@ export function applyValueAnnotations(
 export function applyReferentialEqualityAnnotations(
   plain: any,
   annotations: ReferentialEqualityAnnotations,
-  version: number
+  version: number,
+  collections: IndexedCollections
 ) {
   const legacyPaths = enableLegacyPaths(version);
   function apply(identicalPaths: string[], path: string) {
-    const object = getDeep(plain, parsePath(path, legacyPaths));
+    const object = getDeep(plain, parsePath(path, legacyPaths), collections);
 
     identicalPaths
       .map(path => parsePath(path, legacyPaths))
       .forEach(identicalObjectPath => {
-        plain = setDeep(plain, identicalObjectPath, () => object);
+        plain = setDeep(plain, identicalObjectPath, () => object, collections);
       });
   }
 
@@ -105,7 +131,8 @@ export function applyReferentialEqualityAnnotations(
       plain = setDeep(
         plain,
         parsePath(identicalPath, legacyPaths),
-        () => plain
+        () => plain,
+        collections
       );
     });
 
