@@ -3,11 +3,36 @@ import { includes } from './util.js';
 
 type Collection = Set<any> | Map<any, any>;
 
-// `values()` and `entries()` would bypass a subclass's own `keys` and `get`.
-const toElements = (collection: Collection): any[] =>
-  isSet(collection)
-    ? [...collection.keys()]
-    : Array.from(collection.keys(), key => [key, collection.get(key)]);
+interface Index {
+  rows: any[];
+  order: any[];
+  valuesInRows: boolean;
+}
+
+// A position counts along `keys()` and a rebuild follows the iterator, so a subclass that orders
+// `keys()` its own way gets a list for each.
+const toIndex = (collection: Collection): Index => {
+  const order: any[] = [...collection];
+  const keys = [...collection.keys()];
+  const set = isSet(collection);
+  if (
+    keys.length === order.length &&
+    keys.every((key, i) => Object.is(key, set ? order[i] : order[i][0]))
+  ) {
+    return { rows: order, order, valuesInRows: false };
+  }
+
+  if (set) {
+    return { rows: keys, order, valuesInRows: false };
+  }
+
+  const entries = new Map(order.map(entry => [entry[0], entry]));
+  return {
+    rows: keys.map(key => entries.get(key) ?? [key]),
+    order,
+    valuesInRows: false,
+  };
+};
 
 // A custom transformer may write a Set or Map in any shape, so its JSON counts only when it lists
 // the members themselves.
@@ -19,7 +44,7 @@ const listsMembers = (collection: Collection, json: any[]) =>
   );
 
 export class IndexedCollections {
-  private elements?: Map<Collection, any[]>;
+  private indexes?: Map<Collection, Index>;
   private written?: Set<Collection>;
 
   // Equal elements collapse when the Set or Map is built, so only the JSON array still has every
@@ -30,39 +55,52 @@ export class IndexedCollections {
       json.length > collection.size &&
       (!custom || listsMembers(collection, json))
     ) {
-      (this.elements ??= new Map()).set(collection, json);
+      (this.indexes ??= new Map()).set(collection, {
+        rows: json,
+        order: json,
+        valuesInRows: true,
+      });
     }
   }
 
   // Without this, every Set or Map that a later annotation replaces stays referenced until
   // `rebuild`.
   flush(collection: Collection) {
-    const elements = this.elements?.get(collection);
-    if (elements) {
+    const index = this.indexes?.get(collection);
+    if (index) {
       if (this.written?.delete(collection)) {
-        fill(collection, elements);
+        fill(collection, index.order);
       }
 
-      this.elements!.delete(collection);
+      this.indexes!.delete(collection);
     }
   }
 
-  elementsOf(collection: Collection): any[] {
-    const known = (this.elements ??= new Map());
-    let elements = known.get(collection);
-    if (!elements) {
-      elements = toElements(collection);
-      known.set(collection, elements);
+  indexFor(collection: Collection): Index {
+    const known = (this.indexes ??= new Map());
+    let index = known.get(collection);
+    if (!index) {
+      index = toIndex(collection);
+      known.set(collection, index);
     }
 
-    return elements;
+    return index;
   }
 
   // Replacing one element of a Set or Map in place costs a pass over all of them, so a write
-  // stays in the element array until `rebuild`.
-  markWritten(collection: Collection, elements: any[]) {
-    // A flush inside the mapper drops this array, so it is registered again.
-    this.elements!.set(collection, elements);
+  // stays in the index until `rebuild`.
+  markWritten(collection: Collection, index: Index) {
+    if (index.rows !== index.order) {
+      // Only the subclass knows its `keys()` order after a write, so this rebuilds at once, at the
+      // cost of a pass per write.
+      fill(collection, index.order);
+      this.indexes!.delete(collection);
+      return;
+    }
+
+    // A flush inside the mapper drops this index, so it is registered again.
+    this.indexes!.set(collection, index);
+    index.valuesInRows = true;
     (this.written ??= new Set()).add(collection);
   }
 
@@ -72,7 +110,7 @@ export class IndexedCollections {
 
   rebuild() {
     this.written?.forEach(collection =>
-      fill(collection, this.elements!.get(collection)!)
+      fill(collection, this.indexes!.get(collection)!.order)
     );
   }
 }
@@ -86,11 +124,19 @@ const fill = (collection: Collection, elements: any[]) => {
   }
 };
 
+// A subclass may answer `get` with something other than what it stores, so a Map that still
+// matches its rows is asked directly.
+const valueAt = (map: Map<any, any>, index: Index, entry: any) =>
+  index.valuesInRows ? entry?.[1] : map.get(entry?.[0]);
+
 // Lands where stepping an iterator `n` times did: NaN and negatives on the first element, a
 // fraction on the next whole index, the size itself on nothing.
-const getNth = (elements: any[], n: number): any => {
-  if (n > elements.length) throw new Error('index out of bounds');
-  return elements[n > 0 ? Math.ceil(n) : 0];
+const getNth = ({ rows, order }: Index, n: number): any => {
+  if (n > Math.max(rows.length, order.length)) {
+    throw new Error('index out of bounds');
+  }
+
+  return rows[n > 0 ? Math.ceil(n) : 0];
 };
 
 function validatePath(path: (string | number)[]) {
@@ -128,18 +174,19 @@ export const getDeep = (
   for (let i = 0; i < path.length; i++) {
     const key = path[i];
     if (isSet(object)) {
-      object = getNth(collections.elementsOf(object), +key);
+      object = getNth(collections.indexFor(object), +key);
     } else if (isMap(object)) {
       const row = +key;
       const type = +path[++i] === 0 ? 'key' : 'value';
 
-      const entry = getNth(collections.elementsOf(object), row);
+      const index = collections.indexFor(object);
+      const entry = getNth(index, row);
       switch (type) {
         case 'key':
           object = entry?.[0];
           break;
         case 'value':
-          object = entry?.[1];
+          object = valueAt(object, index, entry);
           break;
       }
     } else {
@@ -174,7 +221,7 @@ export const setDeep = (
       parent = parent[key];
     } else if (isSet(parent)) {
       const row = +key;
-      parent = getNth(collections.elementsOf(parent), row);
+      parent = getNth(collections.indexFor(parent), row);
     } else if (isMap(parent)) {
       const isEnd = i === path.length - 2;
       if (isEnd) {
@@ -184,13 +231,14 @@ export const setDeep = (
       const row = +key;
       const type = +path[++i] === 0 ? 'key' : 'value';
 
-      const entry = getNth(collections.elementsOf(parent), row);
+      const index = collections.indexFor(parent);
+      const entry = getNth(index, row);
       switch (type) {
         case 'key':
           parent = entry?.[0];
           break;
         case 'value':
-          parent = entry?.[1];
+          parent = valueAt(parent, index, entry);
           break;
       }
     }
@@ -205,20 +253,20 @@ export const setDeep = (
   }
 
   if (isSet(parent)) {
-    const index = +lastKey;
-    const values = collections.elementsOf(parent);
-    const oldValue = getNth(values, index);
+    const position = +lastKey;
+    const index = collections.indexFor(parent);
+    const oldValue = getNth(index, position);
     const newValue = mapper(oldValue);
     if (oldValue !== newValue) {
-      values[index] = newValue;
-      collections.markWritten(parent, values);
+      index.order[position] = newValue;
+      collections.markWritten(parent, index);
     }
   }
 
   if (isMap(parent)) {
     const row = +path[path.length - 2];
-    const entries = collections.elementsOf(parent);
-    const entry = getNth(entries, row);
+    const index = collections.indexFor(parent);
+    const entry = getNth(index, row);
     const keyToRow = entry?.[0];
 
     const type = +lastKey === 0 ? 'key' : 'value';
@@ -227,17 +275,17 @@ export const setDeep = (
         const newKey = mapper(keyToRow);
         if (newKey !== keyToRow && entry) {
           entry[0] = newKey;
-          collections.markWritten(parent, entries);
+          collections.markWritten(parent, index);
         }
         break;
       }
 
       case 'value': {
-        const value = mapper(entry?.[1]);
+        const value = mapper(valueAt(parent, index, entry));
         if (entry) {
           entry[1] = value;
         } else {
-          entries.push([keyToRow, value]);
+          index.order.push([keyToRow, value]);
         }
 
         // A Map with no rebuild pending still matches its entries, so the value goes straight in.

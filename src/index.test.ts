@@ -1741,6 +1741,86 @@ test('a custom Map subclass with its own get() shares the value that get() retur
   expect(output.a.b.c.copy).toBe(output.map.get('a'));
 });
 
+test('a custom Map subclass shares a key without get() being called for the other keys', () => {
+  class Strict extends Map<unknown, number> {
+    get(key: unknown) {
+      if (key === 'locked') throw new Error('locked');
+      return super.get(key);
+    }
+  }
+  const instance = new SuperJSON();
+  instance.registerCustom<Strict, any[]>(
+    {
+      isApplicable: (v): v is Strict => v instanceof Strict,
+      serialize: v => [...v.entries()],
+      deserialize: v => new Strict(v),
+    },
+    'Strict'
+  );
+  const key = { id: 1 };
+
+  const output: any = instance.parse(
+    instance.stringify({ key, map: new Strict([[key, 1], ['locked', 2]]) })
+  );
+
+  expect([...output.map.keys()]).toEqual([key, 'locked']);
+  expect([...output.map.keys()][0]).toBe(output.key);
+});
+
+test('a custom Map subclass with its own get() keeps its stored values when a key is shared', () => {
+  class Doubled extends Map<unknown, number> {
+    get(key: unknown) {
+      return super.get(key)! * 2;
+    }
+  }
+  const instance = new SuperJSON();
+  instance.registerCustom<Doubled, any[]>(
+    {
+      isApplicable: (v): v is Doubled => v instanceof Doubled,
+      serialize: v => [...v.entries()],
+      deserialize: v => new Doubled(v),
+    },
+    'Doubled'
+  );
+  const key = { id: 1 };
+
+  const output: any = instance.parse(
+    instance.stringify({ key, map: new Doubled([[key, 1], ['b', 2]]) })
+  );
+
+  expect([...output.map.entries()]).toEqual([
+    [key, 1],
+    ['b', 2],
+  ]);
+});
+
+test('a custom Set subclass with its own keys() order keeps every member when one is shared', () => {
+  class NewestFirst extends Set<unknown> {
+    *keys() {
+      yield* [...super.values()].reverse();
+    }
+  }
+  const instance = new SuperJSON();
+  instance.registerCustom<NewestFirst, any[]>(
+    {
+      isApplicable: (v): v is NewestFirst => v instanceof NewestFirst,
+      serialize: v => [...v],
+      deserialize: v => new NewestFirst(v),
+    },
+    'NewestFirst'
+  );
+  const a = { id: 'a' };
+  const b = { id: 'b' };
+  const c = { id: 'c' };
+
+  const output: any = instance.parse(
+    instance.stringify({ a, set: new NewestFirst([a, b, c]) })
+  );
+
+  expect([...output.set]).toEqual([a, b, c]);
+  expect([...output.set][0]).toBe(output.a);
+});
+
 test('dedupe=true', () => {
   const instance = new SuperJSON({
     dedupe: true,
