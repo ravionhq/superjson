@@ -1,6 +1,8 @@
 import { isMap, isArray, isPlainObject, isSet } from './is.js';
 import { includes } from './util.js';
 
+const positionOf = (n: number): number => (n > 0 ? Math.ceil(n) : 0);
+
 const getNthKey = (value: Map<any, any> | Set<any>, n: number): any => {
   if (n > value.size) throw new Error('index out of bounds');
   const keys = value.keys();
@@ -115,7 +117,7 @@ export const walkDeep = (object: any, path: Path): [any, Path] => {
 export const setDeep = (
   object: any,
   path: Path,
-  mapper: (v: any) => any
+  mapper: (v: any, container?: object, slot?: string | number) => any
 ): any => {
   validatePath(path);
 
@@ -128,15 +130,16 @@ export const setDeep = (
   const lastKey = path[path.length - 1];
 
   if (isArray(parent)) {
-    parent[+lastKey] = mapper(parent[+lastKey]);
+    const index = +lastKey;
+    parent[index] = mapper(parent[index], parent, index);
   } else if (isPlainObject(parent)) {
-    parent[lastKey] = mapper(parent[lastKey]);
+    parent[lastKey] = mapper(parent[lastKey], parent, lastKey);
   }
 
   if (isSet(parent)) {
     const index = +lastKey;
     const oldValue = getNthKey(parent, index);
-    const newValue = mapper(oldValue);
+    const newValue = mapper(oldValue, parent, positionOf(index));
     if (oldValue !== newValue) {
       const values = [...parent];
       values[index] = newValue;
@@ -148,11 +151,13 @@ export const setDeep = (
   if (isMap(parent)) {
     const row = +path[path.length - 2];
     const keyToRow = getNthKey(parent, row);
+    const keySlot = 2 * positionOf(row);
+    const valueSlot = keySlot + 1;
 
     const type = +lastKey === 0 ? 'key' : 'value';
     switch (type) {
       case 'key': {
-        const newKey = mapper(keyToRow);
+        const newKey = mapper(keyToRow, parent, keySlot);
         if (newKey !== keyToRow) {
           const entries = [...parent];
           parent.clear();
@@ -164,7 +169,7 @@ export const setDeep = (
       }
 
       case 'value': {
-        parent.set(keyToRow, mapper(parent.get(keyToRow)));
+        parent.set(keyToRow, mapper(parent.get(keyToRow), parent, valueSlot));
         break;
       }
     }

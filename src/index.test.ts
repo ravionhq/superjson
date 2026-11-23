@@ -2,6 +2,7 @@
 /* eslint-disable es5/no-es6-methods */
 
 import * as fs from 'fs';
+import * as vm from 'vm';
 
 import SuperJSON from './index.js';
 import { JSONValue, SuperJSONResult, SuperJSONValue } from './types.js';
@@ -1541,6 +1542,15 @@ test('rejects typed-array values that are not arrays', () => {
   expect([...restored]).toEqual([1, 2, 3]);
 });
 
+test('rejects a typed-array tag that names an Object.prototype member', () => {
+  expect(() =>
+    SuperJSON.deserialize({
+      json: [1, 2],
+      meta: { values: [['typed-array', 'constructor']] },
+    })
+  ).toThrow('unknown typed array');
+});
+
 test('#310 fixes backwards compat', () => {
   expect(
     SuperJSON.deserialize({
@@ -1646,4 +1656,237 @@ test('unwalkable paths without a value annotation are ignored', () => {
   expect(() =>
     deserialize({ s: ['set'], 's.7': { a: ['Date'] } })
   ).toThrowError('index out of bounds');
+});
+
+describe('one value that many value annotations point at', () => {
+  class Tagged {}
+  class Bare extends null {}
+  const superJson = new SuperJSON();
+  superJson.registerClass(Tagged);
+  superJson.registerClass(Bare);
+
+  const cases: [string, any, any][] = [
+    ['set', Array.from({ length: 100000 }, () => []), 'set'],
+    ['map', Array.from({ length: 20000 }, (_, i) => [i, 0]), 'map'],
+    ['URL', 'https://example.com/' + 'a'.repeat(2000000), 'URL'],
+    ['typed-array', Array(100000).fill(0), ['typed-array', 'Uint8Array']],
+    [
+      'class',
+      Object.fromEntries(Array.from({ length: 3000 }, (_, i) => ['k' + i, 0])),
+      ['class', 'Tagged'],
+    ],
+    [
+      'class without Object.prototype',
+      Object.fromEntries(Array.from({ length: 3000 }, (_, i) => ['k' + i, 0])),
+      ['class', 'Bare'],
+    ],
+  ];
+
+  test.each(cases)('is converted once by %s tags', (_, json, tag) => {
+    const spellingsOfIndex0 = Array.from({ length: 5000 }, (_, i) => '0e' + i);
+    const values = Object.fromEntries(
+      spellingsOfIndex0.map(key => [key, [tag]])
+    );
+
+    const start = Date.now();
+    const output = superJson.deserialize({ json: [json], meta: { values } });
+
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(superJson.serialize(output)).toEqual({
+      json: [json],
+      meta: { values: { 0: [tag] }, v: 1 },
+    });
+  });
+
+  test('is still restored as its class when Object is registered too', () => {
+    const withObject = new SuperJSON();
+    withObject.registerClass(Object);
+    withObject.registerClass(Tagged);
+
+    expect(withObject.parse(withObject.stringify(new Tagged()))).toBeInstanceOf(
+      Tagged
+    );
+  });
+
+  test.each([
+    ['Object', Object],
+    ['Bare', Bare],
+  ])(
+    'is converted once by %s tags when it has its own constructor key',
+    (name, clazz) => {
+      const withObject = new SuperJSON();
+      withObject.registerClass(Object);
+      withObject.registerClass(Bare);
+      const json = Object.fromEntries(
+        Array.from({ length: 3000 }, (_, i) => ['k' + i, 0])
+      );
+      json.constructor = null as any;
+      const values = Object.fromEntries(
+        Array.from({ length: 5000 }, (_, i) => ['0e' + i, [['class', name]]])
+      );
+
+      const start = Date.now();
+      const output: any = withObject.deserialize({
+        json: [json],
+        meta: { values },
+      });
+
+      expect(Date.now() - start).toBeLessThan(1000);
+      expect(Object.getPrototypeOf(output[0])).toBe(clazz.prototype);
+      expect({ ...output[0] }).toEqual(json);
+    }
+  );
+
+  test('keeps its first conversion when a different tag follows', () => {
+    expect(
+      SuperJSON.deserialize({
+        json: [[[1, 2]]],
+        meta: { values: { '0': ['set'], '0e0': ['map'] } },
+      })
+    ).toEqual([new Set([[1, 2]])]);
+  });
+
+  test('deserializes in place when serialize reused one array for two paths', () => {
+    const shared = [
+      new Set([1]),
+      new Map([[1, 2]]),
+      new Uint8Array([1]),
+      new Date(0),
+      new URL('https://example.com/'),
+      /a/,
+    ];
+    const input = { a: shared, b: shared };
+
+    expect(
+      SuperJSON.deserialize(SuperJSON.serialize(input), { inPlace: true })
+    ).toEqual(input);
+  });
+
+  const countingCustom = () => {
+    const counting = { superJson: new SuperJSON(), calls: 0 };
+    counting.superJson.registerCustom<any, string>(
+      {
+        isApplicable: v => v instanceof Tagged,
+        serialize: () => 'x',
+        deserialize: v => {
+          counting.calls++;
+          return v + '!';
+        },
+      },
+      'counted'
+    );
+    return counting;
+  };
+
+  test('is passed to a custom deserialize once', () => {
+    const counting = countingCustom();
+    const values = Object.fromEntries(
+      Array.from({ length: 5000 }, (_, i) => [
+        '0e' + i,
+        [['custom', 'counted']],
+      ])
+    );
+
+    expect(
+      counting.superJson.deserialize({ json: ['x'], meta: { values } })
+    ).toEqual(['x!']);
+    expect(counting.calls).toBe(1);
+  });
+
+  test('is passed to a custom deserialize once inside a Set and a Map', () => {
+    const counting = countingCustom();
+    const custom = [['custom', 'counted']];
+
+    expect(
+      counting.superJson.deserialize({
+        json: { set: ['x'], map: [['k', 'v']] },
+        meta: {
+          values: {
+            set: ['set'],
+            'set.0': custom,
+            'set.0e0': custom,
+            'set.-1': custom,
+            map: ['map'],
+            'map.0.0': custom,
+            'map.0e0.0': custom,
+            'map.0.1': custom,
+            'map.0.2': custom,
+          },
+        },
+      })
+    ).toEqual({ set: new Set(['x!']), map: new Map([['k!', 'v!']]) });
+    expect(counting.calls).toBe(3);
+  });
+
+  test('is passed to a custom deserialize once when serialize reused one array', () => {
+    const counting = countingCustom();
+    const shared = [new Tagged()];
+
+    expect(
+      counting.superJson.deserialize(
+        counting.superJson.serialize({ a: shared, b: shared }),
+        { inPlace: true }
+      )
+    ).toEqual({ a: ['x!'], b: ['x!'] });
+    expect(counting.calls).toBe(1);
+  });
+
+  test('is passed to a custom deserialize once when the arrays around it are replaced', () => {
+    const copying = { superJson: new SuperJSON(), leafCalls: 0 };
+    copying.superJson.registerCustom<any, any>(
+      {
+        isApplicable: () => false,
+        serialize: v => v,
+        deserialize: v => {
+          const copy = [...v];
+          if (copy.length === 2) {
+            copying.leafCalls++;
+          }
+          return copy;
+        },
+      },
+      'copy'
+    );
+
+    const depth = 10;
+    let json: any = [1, 2];
+    for (let i = 0; i < depth; i++) {
+      json = [json];
+    }
+
+    const values: Record<string, any> = {};
+    const tag = (level: number, annotation: any) => {
+      const spellingOfIndex0 = '0e' + Object.keys(values).length;
+      const path = [...Array(level - 1).fill('0'), spellingOfIndex0];
+      values[path.join('.')] = [annotation];
+    };
+    const replaceEachLevelBelow = (level: number) => {
+      if (level === depth) {
+        return;
+      }
+
+      tag(level + 1, ['custom', 'copy']);
+      replaceEachLevelBelow(level + 1);
+      if (level + 1 < depth) {
+        tag(level + 1, 'set');
+        replaceEachLevelBelow(level + 1);
+      }
+    };
+    replaceEachLevelBelow(0);
+
+    copying.superJson.deserialize({ json, meta: { values } });
+
+    expect(copying.leafCalls).toBe(1);
+  });
+});
+
+test('converts a plain object that was parsed in another realm', () => {
+  const json = vm.runInNewContext('[{ name: "Error", message: "m" }]');
+
+  const output = SuperJSON.deserialize<[Error]>({
+    json,
+    meta: { values: { 0: ['Error'] } },
+  });
+
+  expect(output[0]).toBeInstanceOf(Error);
 });

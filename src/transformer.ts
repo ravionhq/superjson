@@ -223,11 +223,14 @@ const constructorToName = [
 ].reduce<Record<string, TypedArrayConstructor>>((obj, ctor) => {
   obj[ctor.name] = ctor;
   return obj;
-}, {});
+}, Object.create(null));
 
 // BigInt-backed typed arrays hold `bigint` elements, which JSON.stringify
 // cannot represent. They're serialized/deserialized as strings instead.
-const bigIntConstructorToName: Record<string, BigIntTypedArrayConstructor> = {};
+const bigIntConstructorToName: Record<
+  string,
+  BigIntTypedArrayConstructor
+> = Object.create(null);
 if (typeof BigInt64Array !== 'undefined') {
   bigIntConstructorToName[BigInt64Array.name] = BigInt64Array;
 }
@@ -295,6 +298,8 @@ export function isInstanceOfRegisteredClass(
   return false;
 }
 
+const restoredInstances = new WeakSet<object>();
+
 const classRule = compositeTransformation(
   isInstanceOfRegisteredClass,
   (clazz, superJson) => {
@@ -324,7 +329,17 @@ const classRule = compositeTransformation(
       );
     }
 
-    return Object.assign(Object.create(clazz.prototype), v);
+    if (restoredInstances.has(v)) {
+      return v;
+    }
+
+    const instance = Object.assign(Object.create(clazz.prototype), v);
+    // Tracking every instance slows class-heavy payloads by 60%; isConverted already recognises the
+    // others.
+    if (!isConverted(instance)) {
+      restoredInstances.add(instance);
+    }
+    return instance;
   }
 );
 
@@ -468,11 +483,29 @@ simpleRules.forEach(rule => {
   simpleRulesByAnnotation[rule.annotation] = rule;
 });
 
+const isConverted = (json: any): boolean => {
+  if (typeof json !== 'object' || json === null || isArray(json)) {
+    return false;
+  }
+
+  // A plain object parsed in another realm has that realm's Object.prototype, which isPlainObject
+  // rejects.
+  const prototype = Object.getPrototypeOf(json);
+  return prototype !== null && Object.getPrototypeOf(prototype) !== null;
+};
+
 export const untransformValue = (
   json: any,
   type: TypeAnnotation,
   superJson: SuperJSON
 ) => {
+  // Built-in rules serialize to primitives, arrays and plain objects only, so any other object was
+  // already converted by an earlier annotation; a custom transformer can serialize to anything.
+  const isCustom = isArray(type) && type[0] === 'custom';
+  if (!isCustom && isConverted(json)) {
+    return json;
+  }
+
   if (isArray(type)) {
     switch (type[0]) {
       case 'symbol':
