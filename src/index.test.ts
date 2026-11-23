@@ -1290,6 +1290,29 @@ test('prototype pollution - constructor', () => {
   expect((Object.prototype as any).x).toBeUndefined();
 });
 
+test('applies a custom transformer that is registered during serialize', () => {
+  const s = new SuperJSON();
+  const value = {
+    get a() {
+      s.registerCustom<string, string>(
+        {
+          isApplicable: (v): v is string =>
+            typeof v === 'string' && v.startsWith('x'),
+          serialize: v => v.slice(1),
+          deserialize: v => 'x' + v,
+        },
+        'x-string'
+      );
+      return 1;
+    },
+    b: 'xyz',
+  };
+
+  const res = s.serialize(value);
+  expect(res.json).toEqual({ a: 1, b: 'yz' });
+  expect(res.meta?.values).toEqual({ b: [['custom', 'x-string']] });
+});
+
 test('superjson instances are independent of one another', () => {
   class Car {}
   const s1 = new SuperJSON();
@@ -1566,6 +1589,73 @@ test('#310 fixes backwards compat', () => {
       b: new Set([1, 2]),
     },
   });
+});
+
+test('deserialize is linear in path depth times child count', () => {
+  const depth = 50_000;
+  const childCount = 10_000;
+  const children: Record<string, [string]> = {};
+  for (let i = 0; i < childCount; i++) {
+    children[i] = ['Date'];
+  }
+
+  const start = performance.now();
+  SuperJSON.deserialize({
+    json: 0,
+    meta: {
+      values: { [Array(depth).fill('a').join('.')]: ['Date', children] },
+      v: 1,
+    },
+  } as any);
+
+  expect(performance.now() - start).toBeLessThan(500);
+});
+
+test('value annotations on missing paths add no keys', () => {
+  const result = SuperJSON.deserialize({
+    json: { c: 5 },
+    meta: { values: { zz: { x: ['Date'] } }, v: 1 },
+  } as any);
+
+  expect(Object.keys(result as any)).toEqual(['c']);
+});
+
+test('value annotations can address a Map that is already converted', () => {
+  const [map] = SuperJSON.deserialize<[Map<Date, unknown>]>({
+    json: [[[5, { b: [1, 2] }]]] as any,
+    meta: {
+      values: { '0': ['map'], '0.0': { '0': ['Date'], '1.b': ['set'] } },
+      v: 1,
+    },
+  });
+
+  expect([...map]).toEqual([[new Date(5), { b: new Set([1, 2]) }]]);
+});
+
+test('prototype pollution - nested value annotations', () => {
+  expect(() =>
+    SuperJSON.deserialize(
+      JSON.parse(
+        '{"json":{"a":{}},"meta":{"values":{"a.__proto__":{"polluted":["undefined"]}},"v":1}}'
+      )
+    )
+  ).toThrowError('__proto__ is not allowed as a property');
+  expect(({} as any).polluted).toBeUndefined();
+});
+
+test('unwalkable paths without a value annotation are ignored', () => {
+  const deserialize = (values: unknown) =>
+    SuperJSON.deserialize({
+      json: { s: [1, 2] },
+      meta: { values, v: 1 },
+    } as any);
+  const expected = { s: new Set([1, 2]) };
+
+  expect(deserialize({ s: ['set'], constructor: {} })).toEqual(expected);
+  expect(deserialize({ s: ['set'], 's.7': { a: {} } })).toEqual(expected);
+  expect(() =>
+    deserialize({ s: ['set'], 's.7': { a: ['Date'] } })
+  ).toThrowError('index out of bounds');
 });
 
 describe('one value that many value annotations point at', () => {

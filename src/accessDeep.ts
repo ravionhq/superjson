@@ -67,20 +67,12 @@ export const getDeep = (object: object, path: (string | number)[]): object => {
   return object;
 };
 
-export const setDeep = (
-  object: any,
-  path: (string | number)[],
-  mapper: (v: any, container?: object, slot?: string | number) => any
-): any => {
-  validatePath(path);
+type Path = (string | number)[];
 
-  if (path.length === 0) {
-    return mapper(object);
-  }
-
-  let parent = object;
-
-  for (let i = 0; i < path.length - 1; i++) {
+// Leaves the segments a write needs: the last key, or a Map's row and selector.
+const walk = (parent: any, path: Path): [any, number] => {
+  let i = 0;
+  for (; i < path.length - 1; i++) {
     const key = path[i];
 
     if (isArray(parent)) {
@@ -111,6 +103,29 @@ export const setDeep = (
       }
     }
   }
+
+  return [parent, i];
+};
+
+export const walkDeep = (object: any, path: Path): [any, Path] => {
+  validatePath(path);
+
+  const [parent, rest] = walk(object, path);
+  return [parent, path.slice(rest)];
+};
+
+export const setDeep = (
+  object: any,
+  path: Path,
+  mapper: (v: any, container?: object, slot?: string | number) => any
+): any => {
+  validatePath(path);
+
+  if (path.length === 0) {
+    return mapper(object);
+  }
+
+  const [parent] = walk(object, path);
 
   const lastKey = path[path.length - 1];
 

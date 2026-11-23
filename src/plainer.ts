@@ -17,7 +17,7 @@ import {
 } from './transformer.js';
 import { forEach } from './util.js';
 import { parsePath } from './pathstringifier.js';
-import { getDeep, setDeep } from './accessDeep.js';
+import { getDeep, setDeep, walkDeep } from './accessDeep.js';
 import SuperJSON from './index.js';
 
 type Tree<T> = InnerNode<T> | Leaf<T>;
@@ -28,94 +28,95 @@ export type MinimisedTree<T> = Tree<T> | Record<string, Tree<T>> | undefined;
 
 const enableLegacyPaths = (version: number) => version < 1;
 
-function traverse<T>(
-  tree: MinimisedTree<T>,
-  walker: (v: T, path: string[]) => void,
-  version: number,
-  origin: string[] = []
-): void {
-  if (!tree) {
-    return;
-  }
-
-  const legacyPaths = enableLegacyPaths(version);
-  if (!isArray(tree)) {
-    forEach(tree, (subtree, key) =>
-      traverse(subtree, walker, version, [
-        ...origin,
-        ...parsePath(key, legacyPaths),
-      ])
-    );
-    return;
-  }
-
-  const [nodeValue, children] = tree;
-  if (children) {
-    forEach(children, (child, key) => {
-      traverse(child, walker, version, [
-        ...origin,
-        ...parsePath(key, legacyPaths),
-      ]);
-    });
-  }
-
-  walker(nodeValue, origin);
-}
-
 export function applyValueAnnotations(
   plain: any,
   annotations: MinimisedTree<TypeAnnotation>,
   version: number,
   superJson: SuperJSON
 ) {
+  const legacyPaths = enableLegacyPaths(version);
   let customSlots: Map<object, Set<unknown>> | undefined;
   let customContainers: WeakSet<object> | undefined;
 
-  traverse(
-    annotations,
-    (type, path) => {
-      const isCustom = isArray(type) && type[0] === 'custom';
-      plain = setDeep(plain, path, (v, container, slot) => {
-        if (isCustom) {
-          if (customContainers?.has(v)) {
+  const apply = (
+    node: any,
+    path: (string | number)[],
+    tree: MinimisedTree<TypeAnnotation>,
+    error?: unknown
+  ): any => {
+    if (!tree) {
+      return node;
+    }
+
+    const children = isArray(tree) ? tree[1] : tree;
+    if (children) {
+      let parent: any;
+      let rest: (string | number)[] = [];
+      // An unwalkable path only fails once an annotation below it is applied.
+      if (!error) {
+        try {
+          [parent, rest] = walkDeep(node, path);
+        } catch (e) {
+          error = e;
+        }
+      }
+
+      for (const key of Object.keys(children)) {
+        apply(
+          parent,
+          [...rest, ...parsePath(key, legacyPaths)],
+          children[key],
+          error
+        );
+      }
+    }
+
+    if (!isArray(tree)) {
+      return node;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    const type = tree[0];
+    const isCustom = isArray(type) && type[0] === 'custom';
+    return setDeep(node, path, (v, container, slot) => {
+      if (isCustom) {
+        if (customContainers?.has(v)) {
+          return v;
+        }
+
+        if (container) {
+          customSlots ??= new Map();
+          let slots = customSlots.get(container);
+          if (!slots) {
+            customSlots.set(container, (slots = new Set()));
+          }
+
+          if (slots.has(slot)) {
             return v;
           }
 
-          if (container) {
-            customSlots ??= new Map();
-            let slots = customSlots.get(container);
-            if (!slots) {
-              customSlots.set(container, (slots = new Set()));
-            }
-
-            if (slots.has(slot)) {
-              return v;
-            }
-
-            slots.add(slot);
-          }
+          slots.add(slot);
         }
+      }
 
-        const value = untransformValue(v, type, superJson);
-        // A replaced container has no slots recorded, so without this each replacement lets the
-        // custom deserialize of everything inside it run again.
-        if (
-          (isCustom || (value !== v && customContainers?.has(v))) &&
-          (isArray(value) ||
-            isPlainObject(value) ||
-            isSet(value) ||
-            isMap(value))
-        ) {
-          (customContainers ??= new WeakSet()).add(value);
-        }
+      const value = untransformValue(v, type, superJson);
+      // A replaced container has no slots recorded, so without this each replacement lets the
+      // custom deserialize of everything inside it run again.
+      if (
+        (isCustom || (value !== v && customContainers?.has(v))) &&
+        (isArray(value) || isPlainObject(value) || isSet(value) || isMap(value))
+      ) {
+        (customContainers ??= new WeakSet()).add(value);
+      }
 
-        return value;
-      });
-    },
-    version
-  );
+      return value;
+    });
+  };
 
-  return plain;
+  return apply(plain, [], annotations);
 }
 
 export function applyReferentialEqualityAnnotations(
@@ -322,12 +323,44 @@ const isPlainContainer = (object: any): boolean =>
   isPlainObject(object) ||
   (isArray(object) && Object.getPrototypeOf(object) === Array.prototype);
 
+/**
+ * A string, boolean, null or finite number other than -0. When no class or custom transformer
+ * is registered, `walk` returns it as is with no annotations.
+ */
+const isUntransformedJSONPrimitive = (object: any): boolean => {
+  switch (typeof object) {
+    case 'string':
+    case 'boolean':
+      return true;
+    case 'number':
+      return (
+        object === object &&
+        object !== Infinity &&
+        object !== -Infinity &&
+        (object !== 0 || 1 / object > 0)
+      );
+    case 'object':
+      return object === null;
+    default:
+      return false;
+  }
+};
+
 function walk(
   object: any,
   ctx: WalkContext,
   parent: PathNode | null,
   key: string | null
 ): any {
+  if (
+    ctx.superJson.classRegistry.size === 0 &&
+    ctx.superJson.customTransformerRegistry.size === 0 &&
+    isUntransformedJSONPrimitive(object)
+  ) {
+    ctx.annotations = undefined;
+    return object;
+  }
+
   const primitive = isPrimitive(object);
   let seen: Seen | undefined;
 
